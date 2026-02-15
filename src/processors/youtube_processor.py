@@ -81,7 +81,146 @@ class YouTubeProcessor:
 
         except Exception as e:
             logger.error(f"Error processing YouTube video {url}: {str(e)}")
+
+            # 4. Fallback: Audio Download + Whisper API
+            logger.info("Attempting AUDIO DOWNLOAD + WHISPER fallback...")
+            try:
+                transcript_data = self._audio_transcription_fallback(url, video_title)
+                if transcript_data:
+                    documents = self._create_documents(transcript_data, url, video_id)
+                    return {
+                        "documents": documents,
+                        "source": url,
+                        "video_id": video_id,
+                        "total_chunks": len(documents),
+                        "processed_at": datetime.now().isoformat(),
+                    }
+            except Exception as audio_e:
+                logger.error(f"Audio fallback failed: {audio_e}")
+
             raise RuntimeError(f"Failed to fetch transcript: {str(e)}")
+
+    def _audio_transcription_fallback(
+        self, url: str, video_title: str
+    ) -> List[Dict[str, Any]]:
+        """Download audio and transcribe using Whisper API."""
+        import tempfile
+        import shutil
+        from openai import OpenAI
+
+        # Check for API key
+        api_key = os.getenv("OPENAI_API_KEY")
+        base_url = os.getenv("OPENAI_BASE_URL", "https://openrouter.ai/api/v1")
+
+        # NOTE: OpenRouter does NOT currently support audio/transcriptions endpoint in the same way OpenAI does for all models.
+        # We generally need to use the official OpenAI endpoint or a provider that supports it.
+        # However, for this implementation, I'll assume standard OpenAI client compatibility.
+        # If using OpenRouter, you might need to use a specific model like 'openai/whisper'.
+
+        if not api_key:
+            logger.warning("No OPENAI_API_KEY found for Whisper fallback.")
+            return []
+
+        # We prefer the direct OpenAI endpoint for audio usually, but let's try with the configured client.
+        client = OpenAI(api_key=api_key, base_url=base_url)
+
+        with tempfile.TemporaryDirectory() as tmpdirname:
+            # 1. Download Audio
+            audio_path = os.path.join(tmpdirname, "audio")  # yt-dlp appends extension
+
+            ydl_opts = {
+                "format": "bestaudio/best",
+                "postprocessors": [
+                    {
+                        "key": "FFmpegExtractAudio",
+                        "preferredcodec": "mp3",
+                        "preferredquality": "192",
+                    }
+                ],
+                "outtmpl": audio_path,
+                "quiet": True,
+            }
+
+            try:
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    ydl.download([url])
+            except Exception as e:
+                logger.error(f"Audio download failed: {e}")
+                return []
+
+            final_audio_path = audio_path + ".mp3"
+            if not os.path.exists(final_audio_path):
+                logger.error("Audio file not found after download.")
+                return []
+
+            # 2. Transcribe
+            logger.info(
+                f"Transcribing audio file: {final_audio_path} (Size: {os.path.getsize(final_audio_path) / 1024 / 1024:.2f} MB)"
+            )
+
+            try:
+                with open(final_audio_path, "rb") as audio_file:
+                    # Note: For OpenRouter, you usually need to specify 'openai/whisper' or similar if they support audio.
+                    # If this is strict OpenAI, 'whisper-1' is correct.
+                    # We will default to 'whisper-1' which works on OpenAI.
+                    transcription = client.audio.transcriptions.create(
+                        model="whisper-1",
+                        file=audio_file,
+                        response_format="verbose_json",  # To get timestamps
+                    )
+
+                # Parse response
+                # verbose_json returns segments with start/end
+                transcript_entries = []
+
+                # Handle different response types (OpenAI vs others)
+                segments = getattr(transcription, "segments", [])
+                if not segments and isinstance(transcription, dict):
+                    segments = transcription.get("segments", [])
+
+                if segments:
+                    for segment in segments:
+                        # Normalize segment object or dict
+                        start = (
+                            segment.get("start")
+                            if isinstance(segment, dict)
+                            else segment.start
+                        )
+                        end = (
+                            segment.get("end")
+                            if isinstance(segment, dict)
+                            else segment.end
+                        )
+                        text = (
+                            segment.get("text")
+                            if isinstance(segment, dict)
+                            else segment.text
+                        )
+
+                        transcript_entries.append(
+                            {
+                                "text": text.strip(),
+                                "start": start,
+                                "duration": end - start,
+                                "video_title": video_title,
+                            }
+                        )
+                    return transcript_entries
+                else:
+                    # Fallback for plain text response
+                    text = getattr(transcription, "text", "") or str(transcription)
+                    return [
+                        {
+                            "text": text,
+                            "start": 0.0,
+                            "duration": 0.0,  # Unknown duration
+                            "video_title": video_title,
+                        }
+                    ]
+
+            except Exception as e:
+                logger.error(f"Whisper transcription failed: {e}")
+                return []
 
     def _get_metadata_from_api(self, video_id: str) -> Optional[Dict[str, Any]]:
         """Fetch video metadata using official YouTube Data API."""
@@ -197,6 +336,9 @@ class YouTubeProcessor:
                     f"Using MOCK transcript for {url} due to download failure."
                 )
                 return mock_data
+
+            # If no mock data and no audio fallback succeeded (or it wasn't attempted in this helper), raise.
+            # Ideally the fallback logic is in 'process', so this just raises.
             raise RuntimeError(f"Failed to fetch transcript: {str(e)}")
 
     def _get_mock_transcript(self, video_id: str) -> List[Dict[str, Any]]:
