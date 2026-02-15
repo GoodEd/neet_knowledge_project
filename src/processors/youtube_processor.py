@@ -106,22 +106,18 @@ class YouTubeProcessor:
         """Download audio and transcribe using Whisper API."""
         import tempfile
         import shutil
+        import subprocess
+        import glob
         from openai import OpenAI
 
         # Check for API key
         api_key = os.getenv("OPENAI_API_KEY")
         base_url = os.getenv("OPENAI_BASE_URL", "https://openrouter.ai/api/v1")
 
-        # NOTE: OpenRouter does NOT currently support audio/transcriptions endpoint in the same way OpenAI does for all models.
-        # We generally need to use the official OpenAI endpoint or a provider that supports it.
-        # However, for this implementation, I'll assume standard OpenAI client compatibility.
-        # If using OpenRouter, you might need to use a specific model like 'openai/whisper'.
-
         if not api_key:
             logger.warning("No OPENAI_API_KEY found for Whisper fallback.")
             return []
 
-        # We prefer the direct OpenAI endpoint for audio usually, but let's try with the configured client.
         client = OpenAI(api_key=api_key, base_url=base_url)
 
         with tempfile.TemporaryDirectory() as tmpdirname:
@@ -153,74 +149,126 @@ class YouTubeProcessor:
                 logger.error("Audio file not found after download.")
                 return []
 
-            # 2. Transcribe
-            logger.info(
-                f"Transcribing audio file: {final_audio_path} (Size: {os.path.getsize(final_audio_path) / 1024 / 1024:.2f} MB)"
-            )
+            file_size_mb = os.path.getsize(final_audio_path) / (1024 * 1024)
+            logger.info(f"Downloaded audio size: {file_size_mb:.2f} MB")
 
-            try:
-                with open(final_audio_path, "rb") as audio_file:
-                    # Note: For OpenRouter, you usually need to specify 'openai/whisper' or similar if they support audio.
-                    # If this is strict OpenAI, 'whisper-1' is correct.
-                    # We will default to 'whisper-1' which works on OpenAI.
-                    transcription = client.audio.transcriptions.create(
-                        model="whisper-1",
-                        file=audio_file,
-                        response_format="verbose_json",  # To get timestamps
+            files_to_transcribe = []
+
+            # OpenAI limit is 25MB. Use 24MB to be safe.
+            if file_size_mb > 24:
+                logger.info("File exceeds 25MB limit. Chunking audio...")
+                chunk_dir = os.path.join(tmpdirname, "chunks")
+                os.makedirs(chunk_dir, exist_ok=True)
+
+                # Split into 10-minute chunks (600 seconds)
+                # ffmpeg -i input.mp3 -f segment -segment_time 600 -c copy chunks/out%03d.mp3
+                chunk_pattern = os.path.join(chunk_dir, "chunk%03d.mp3")
+                cmd = [
+                    "ffmpeg",
+                    "-i",
+                    final_audio_path,
+                    "-f",
+                    "segment",
+                    "-segment_time",
+                    "600",
+                    "-c",
+                    "copy",
+                    chunk_pattern,
+                ]
+
+                subprocess.run(
+                    cmd,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    check=True,
+                )
+
+                # Collect chunks
+                chunk_files = sorted(glob.glob(os.path.join(chunk_dir, "*.mp3")))
+                logger.info(f"Split into {len(chunk_files)} chunks.")
+
+                for i, chunk_path in enumerate(chunk_files):
+                    files_to_transcribe.append(
+                        {
+                            "path": chunk_path,
+                            "time_offset": i * 600.0,  # 10 minutes offset per chunk
+                        }
                     )
+            else:
+                files_to_transcribe.append(
+                    {"path": final_audio_path, "time_offset": 0.0}
+                )
 
-                # Parse response
-                # verbose_json returns segments with start/end
-                transcript_entries = []
+            # 2. Transcribe Each File
+            transcript_entries = []
 
-                # Handle different response types (OpenAI vs others)
-                segments = getattr(transcription, "segments", [])
-                if not segments and isinstance(transcription, dict):
-                    segments = transcription.get("segments", [])
+            for item in files_to_transcribe:
+                current_file = item["path"]
+                offset = item["time_offset"]
 
-                if segments:
-                    for segment in segments:
-                        # Normalize segment object or dict
-                        start = (
-                            segment.get("start")
-                            if isinstance(segment, dict)
-                            else segment.start
-                        )
-                        end = (
-                            segment.get("end")
-                            if isinstance(segment, dict)
-                            else segment.end
-                        )
-                        text = (
-                            segment.get("text")
-                            if isinstance(segment, dict)
-                            else segment.text
+                logger.info(
+                    f"Transcribing: {os.path.basename(current_file)} (Offset: {offset}s)"
+                )
+
+                try:
+                    with open(current_file, "rb") as audio_file:
+                        transcription = client.audio.transcriptions.create(
+                            model="whisper-1",
+                            file=audio_file,
+                            response_format="verbose_json",
                         )
 
+                    # Parse response
+                    segments = getattr(transcription, "segments", [])
+                    if not segments and isinstance(transcription, dict):
+                        segments = transcription.get("segments", [])
+
+                    if segments:
+                        for segment in segments:
+                            start = (
+                                segment.get("start")
+                                if isinstance(segment, dict)
+                                else segment.start
+                            )
+                            end = (
+                                segment.get("end")
+                                if isinstance(segment, dict)
+                                else segment.end
+                            )
+                            text = (
+                                segment.get("text")
+                                if isinstance(segment, dict)
+                                else segment.text
+                            )
+
+                            transcript_entries.append(
+                                {
+                                    "text": text.strip(),
+                                    "start": start + offset,
+                                    "duration": end - start,
+                                    "video_title": video_title,
+                                }
+                            )
+                    else:
+                        # Fallback for plain text response (timestamps will be approximate/lost)
+                        text = getattr(transcription, "text", "") or str(transcription)
                         transcript_entries.append(
                             {
-                                "text": text.strip(),
-                                "start": start,
-                                "duration": end - start,
+                                "text": text,
+                                "start": offset,
+                                "duration": 600.0,  # Assumed duration of chunk
                                 "video_title": video_title,
                             }
                         )
-                    return transcript_entries
-                else:
-                    # Fallback for plain text response
-                    text = getattr(transcription, "text", "") or str(transcription)
-                    return [
-                        {
-                            "text": text,
-                            "start": 0.0,
-                            "duration": 0.0,  # Unknown duration
-                            "video_title": video_title,
-                        }
-                    ]
 
-            except Exception as e:
-                logger.error(f"Whisper transcription failed: {e}")
-                return []
+                except Exception as e:
+                    logger.error(
+                        f"Whisper transcription failed for {current_file}: {e}"
+                    )
+                    # Continue to next chunk instead of failing entirely
+                    continue
+
+            return transcript_entries
 
     def _get_metadata_from_api(self, video_id: str) -> Optional[Dict[str, Any]]:
         """Fetch video metadata using official YouTube Data API."""
