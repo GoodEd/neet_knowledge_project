@@ -102,18 +102,16 @@ class NEETRAG:
         docs = []
 
         for chunk in chunked_docs:
-            metadata = {
-                "source": chunk.get("source", ""),
-                "content_type": chunk.get("content_type", "text"),
-                "timestamp": chunk.get("timestamp", ""),
-            }
+            metadata = chunk.copy()
+            content = metadata.pop("content", "")
 
-            if chunk.get("page"):
-                metadata["page"] = chunk.get("page")
-            if chunk.get("chunk_id"):
-                metadata["chunk_id"] = chunk.get("chunk_id")
+            # Ensure standard fields exist
+            if "source" not in metadata:
+                metadata["source"] = ""
+            if "content_type" not in metadata:
+                metadata["content_type"] = "text"
 
-            doc = Document(page_content=chunk.get("content", ""), metadata=metadata)
+            doc = Document(page_content=content, metadata=metadata)
             docs.append(doc)
 
         return docs

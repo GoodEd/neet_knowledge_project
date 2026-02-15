@@ -77,12 +77,31 @@ class ContentProcessor:
     def process_youtube(self, video_url: str) -> Dict[str, Any]:
         result = self.youtube_processor.process(video_url)
 
+        # YoutubeProcessor already returns chunked documents effectively,
+        # but if we want to apply standard chunker:
+        # Note: YoutubeProcessor returns a dict now
+
         if result.get("documents"):
-            chunked = self.chunker.chunk_documents(result["documents"])
-            result["chunked_documents"] = chunked
-            result["total_chunks"] = len(chunked)
+            # If documents are already chunked/processed, we might skip re-chunking
+            # or we can pass them through if needed.
+            # Currently YouTubeProcessor chunks them.
+            result["chunked_documents"] = self._doc_to_dict(result["documents"])
+            result["total_chunks"] = len(result["documents"])
 
         return result
+
+    def _doc_to_dict(self, docs):
+        """Helper to convert LangChain Documents to list of dicts."""
+        return [
+            {
+                "content": doc.page_content,
+                "source": doc.metadata.get("source", ""),
+                "content_type": doc.metadata.get("source_type", "youtube"),
+                "timestamp": doc.metadata.get("start_time", 0),
+                "title": doc.metadata.get("title", ""),
+            }
+            for doc in docs
+        ]
 
     def process_text(self, text: str, source: str = "raw") -> Dict[str, Any]:
         result = self.text_processor.process_raw(text, source)

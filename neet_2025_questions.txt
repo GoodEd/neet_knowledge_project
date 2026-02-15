@@ -1,0 +1,20 @@
+
+NEET 2025 - Physics Section (MOCK)
+
+Q1. A body of mass 10kg is subjected to a force of 100N. What is the acceleration produced?
+(A) 1 m/s^2
+(B) 10 m/s^2
+(C) 100 m/s^2
+(D) 0.1 m/s^2
+
+Q2. Define Newton's Second Law of Motion.
+(A) Force equals mass times acceleration
+(B) For every action there is an equal and opposite reaction
+(C) An object at rest stays at rest
+(D) Gravity is constant
+
+Q3. If the mass of an object is doubled while keeping force constant, what happens to acceleration?
+(A) It doubles
+(B) It halves
+(C) It stays the same
+(D) It becomes zero

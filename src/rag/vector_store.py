@@ -4,7 +4,7 @@ import os
 
 from langchain_core.documents import Document
 from langchain_core.embeddings import FakeEmbeddings
-from langchain_community.vectorstores import Chroma
+from langchain_community.vectorstores import FAISS
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_openai import OpenAIEmbeddings
 
@@ -52,12 +52,11 @@ class VectorStoreManager:
 
         Path(self.persist_directory).mkdir(parents=True, exist_ok=True)
 
-        self.vectorstore = Chroma.from_documents(
+        self.vectorstore = FAISS.from_documents(
             documents=documents,
             embedding=self.embeddings,
-            persist_directory=self.persist_directory,
-            collection_name=collection_name,
         )
+        self.vectorstore.save_local(self.persist_directory)
 
         return self.vectorstore
 
@@ -65,10 +64,10 @@ class VectorStoreManager:
         if not os.path.exists(self.persist_directory):
             raise FileNotFoundError(f"No vectorstore found at {self.persist_directory}")
 
-        self.vectorstore = Chroma(
-            persist_directory=self.persist_directory,
-            embedding_function=self.embeddings,
-            collection_name=collection_name,
+        self.vectorstore = FAISS.load_local(
+            self.persist_directory,
+            self.embeddings,
+            allow_dangerous_deserialization=True,
         )
 
         return self.vectorstore
@@ -78,7 +77,7 @@ class VectorStoreManager:
             return self.create_vectorstore(documents)
 
         self.vectorstore.add_documents(documents)
-        self.vectorstore.persist()
+        self.vectorstore.save_local(self.persist_directory)
 
         return self.vectorstore
 
@@ -115,7 +114,7 @@ class VectorStoreManager:
             return {"status": "not_initialized"}
 
         return {
-            "collection_name": self.vectorstore._collection.name,
+            "collection_name": "faiss_index",
             "embedding_model": self.embedding_model,
             "persist_directory": self.persist_directory,
         }

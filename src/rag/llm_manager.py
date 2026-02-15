@@ -58,7 +58,10 @@ class LLMManager:
         if self.llm is None:
             raise ValueError("LLM not initialized")
 
-        return self.llm.invoke(prompt)
+        response = self.llm.invoke(prompt)
+        if hasattr(response, "content"):
+            return response.content
+        return str(response)
 
     def get_model_info(self) -> Dict[str, Any]:
         return {"provider": self.provider, "model": self.model}
