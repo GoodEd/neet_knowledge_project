@@ -82,10 +82,12 @@ class YouTubeProcessor:
         except Exception as e:
             logger.error(f"Error processing YouTube video {url}: {str(e)}")
 
-            # 4. Fallback: Audio Download + Whisper API
-            logger.info("Attempting AUDIO DOWNLOAD + WHISPER fallback...")
+            # 4. Fallback: Audio Download + Multimodal Chat (OpenRouter/Gemini)
+            logger.info("Attempting AUDIO DOWNLOAD + MULTIMODAL CHAT fallback...")
             try:
-                transcript_data = self._audio_transcription_fallback(url, video_title)
+                transcript_data = self._transcribe_with_multimodal_chat(
+                    url, video_title
+                )
                 if transcript_data:
                     documents = self._create_documents(transcript_data, url, video_id)
                     return {
@@ -100,22 +102,26 @@ class YouTubeProcessor:
 
             raise RuntimeError(f"Failed to fetch transcript: {str(e)}")
 
-    def _audio_transcription_fallback(
+    def _transcribe_with_multimodal_chat(
         self, url: str, video_title: str
     ) -> List[Dict[str, Any]]:
-        """Download audio and transcribe using Whisper API."""
+        """Download audio and transcribe using Multimodal LLM (Gemini via OpenRouter)."""
         import tempfile
         import shutil
         import subprocess
         import glob
+        import base64
+        import json
         from openai import OpenAI
 
         # Check for API key
         api_key = os.getenv("OPENAI_API_KEY")
         base_url = os.getenv("OPENAI_BASE_URL", "https://openrouter.ai/api/v1")
+        # Use a model known to support audio, default to Gemini 2.0 Flash
+        model = os.getenv("OPENAI_MODEL_NAME", "google/gemini-2.0-flash-001")
 
         if not api_key:
-            logger.warning("No OPENAI_API_KEY found for Whisper fallback.")
+            logger.warning("No OPENAI_API_KEY found for Multimodal fallback.")
             return []
 
         client = OpenAI(api_key=api_key, base_url=base_url)
@@ -130,7 +136,7 @@ class YouTubeProcessor:
                     {
                         "key": "FFmpegExtractAudio",
                         "preferredcodec": "mp3",
-                        "preferredquality": "192",
+                        "preferredquality": "128",  # Lower bitrate for smaller payload
                     }
                 ],
                 "outtmpl": audio_path,
@@ -154,14 +160,15 @@ class YouTubeProcessor:
 
             files_to_transcribe = []
 
-            # OpenAI limit is 25MB. Use 24MB to be safe.
-            if file_size_mb > 24:
-                logger.info("File exceeds 25MB limit. Chunking audio...")
+            # Context window limits for audio are generous on Gemini 2.0, but let's be safe.
+            # 10 mins (600s) is safe.
+            if (
+                file_size_mb > 10
+            ):  # Chunk aggressively to keep payload manageable for HTTP
+                logger.info("File large. Chunking audio...")
                 chunk_dir = os.path.join(tmpdirname, "chunks")
                 os.makedirs(chunk_dir, exist_ok=True)
 
-                # Split into 10-minute chunks (600 seconds)
-                # ffmpeg -i input.mp3 -f segment -segment_time 600 -c copy chunks/out%03d.mp3
                 chunk_pattern = os.path.join(chunk_dir, "chunk%03d.mp3")
                 cmd = [
                     "ffmpeg",
@@ -183,23 +190,19 @@ class YouTubeProcessor:
                     check=True,
                 )
 
-                # Collect chunks
                 chunk_files = sorted(glob.glob(os.path.join(chunk_dir, "*.mp3")))
                 logger.info(f"Split into {len(chunk_files)} chunks.")
 
                 for i, chunk_path in enumerate(chunk_files):
                     files_to_transcribe.append(
-                        {
-                            "path": chunk_path,
-                            "time_offset": i * 600.0,  # 10 minutes offset per chunk
-                        }
+                        {"path": chunk_path, "time_offset": i * 600.0}
                     )
             else:
                 files_to_transcribe.append(
                     {"path": final_audio_path, "time_offset": 0.0}
                 )
 
-            # 2. Transcribe Each File
+            # 2. Transcribe Each Chunk
             transcript_entries = []
 
             for item in files_to_transcribe:
@@ -212,60 +215,71 @@ class YouTubeProcessor:
 
                 try:
                     with open(current_file, "rb") as audio_file:
-                        transcription = client.audio.transcriptions.create(
-                            model="whisper-1",
-                            file=audio_file,
-                            response_format="verbose_json",
+                        encoded_string = base64.b64encode(audio_file.read()).decode(
+                            "utf-8"
                         )
 
-                    # Parse response
-                    segments = getattr(transcription, "segments", [])
-                    if not segments and isinstance(transcription, dict):
-                        segments = transcription.get("segments", [])
+                    prompt = """
+                    Transcribe this audio file verbatim. 
+                    Return the output as a JSON list of objects, where each object has:
+                    - "text": The spoken text
+                    - "start": Start time in seconds (relative to audio start)
+                    - "duration": Duration in seconds
+                    
+                    Example: [{"text": "Hello world", "start": 0.5, "duration": 1.2}]
+                    Ensure the JSON is valid. Do not include markdown code blocks.
+                    """
 
-                    if segments:
+                    response = client.chat.completions.create(
+                        model=model,
+                        messages=[
+                            {
+                                "role": "user",
+                                "content": [
+                                    {"type": "text", "text": prompt},
+                                    {
+                                        "type": "input_audio",
+                                        "input_audio": {
+                                            "data": encoded_string,
+                                            "format": "mp3",
+                                        },
+                                    },
+                                ],
+                            }
+                        ],
+                    )
+
+                    content = response.choices[0].message.content
+                    # Clean potential markdown
+                    if content.startswith("```json"):
+                        content = content.replace("```json", "").replace("```", "")
+                    elif content.startswith("```"):
+                        content = content.replace("```", "")
+
+                    segments = json.loads(content)
+
+                    if isinstance(segments, list):
                         for segment in segments:
-                            start = (
-                                segment.get("start")
-                                if isinstance(segment, dict)
-                                else segment.start
-                            )
-                            end = (
-                                segment.get("end")
-                                if isinstance(segment, dict)
-                                else segment.end
-                            )
-                            text = (
-                                segment.get("text")
-                                if isinstance(segment, dict)
-                                else segment.text
-                            )
+                            start = segment.get("start", 0)
+                            end = start + segment.get(
+                                "duration", 0
+                            )  # Calculate end locally if needed
+                            text = segment.get("text", "")
 
                             transcript_entries.append(
                                 {
                                     "text": text.strip(),
                                     "start": start + offset,
-                                    "duration": end - start,
+                                    "duration": segment.get("duration", 0),
                                     "video_title": video_title,
                                 }
                             )
-                    else:
-                        # Fallback for plain text response (timestamps will be approximate/lost)
-                        text = getattr(transcription, "text", "") or str(transcription)
-                        transcript_entries.append(
-                            {
-                                "text": text,
-                                "start": offset,
-                                "duration": 600.0,  # Assumed duration of chunk
-                                "video_title": video_title,
-                            }
-                        )
 
                 except Exception as e:
                     logger.error(
-                        f"Whisper transcription failed for {current_file}: {e}"
+                        f"Multimodal transcription failed for {current_file}: {e}"
                     )
-                    # Continue to next chunk instead of failing entirely
+                    # Fallback for chunk failure - continue
                     continue
 
             return transcript_entries
