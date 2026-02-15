@@ -1,0 +1,114 @@
+# NEET Physics - Kinematics Notes
+
+## Chapter 1: Motion in One Dimension
+
+### Distance and Displacement
+- **Distance** is the total path length traveled by an object.
+- **Displacement** is the shortest distance between initial and final positions.
+
+### Speed and Velocity
+- **Average Speed** = Total Distance / Total Time
+- **Average Velocity** = Total Displacement / Total Time
+
+### Equations of Motion (Uniform Acceleration)
+For a body moving with uniform acceleration:
+1. v = u + at
+2. s = ut + 1/2 at²
+3. v² = u² + 2as
+
+Where:
+- u = initial velocity
+- v = final velocity
+- a = acceleration
+- t = time
+- s = displacement
+
+## Chapter 2: Motion in Two Dimensions
+
+### Projectile Motion
+A projectile motion has two components:
+1. Horizontal component (constant velocity)
+2. Vertical component (uniform acceleration due to gravity)
+
+### Equations for Projectile Motion
+- Time of flight: T = 2u sinθ / g
+- Maximum height: H = u² sin²θ / 2g
+- Range: R = u² sin2θ / g
+
+### Key Points
+- For maximum range, θ = 45°
+- For maximum height, θ = 90°
+- At maximum height, vertical velocity = 0
+
+## Chapter 3: Laws of Motion
+
+### Newton's First Law (Law of Inertia)
+A body continues in its state of rest or uniform motion unless acted upon by an external force.
+
+### Newton's Second Law
+Force = mass × acceleration
+F = ma
+
+### Newton's Third Law
+For every action, there is an equal and opposite reaction.
+
+### Friction
+- Static friction: fs ≤ μs N
+- Kinetic friction: fk = μk N
+- μs > μk (static friction > kinetic friction)
+
+## Chapter 4: Work, Energy and Power
+
+### Work
+Work = Force × Displacement × cosθ
+W = F × s × cosθ
+
+### Kinetic Energy
+KE = 1/2 mv²
+
+### Potential Energy
+PE = mgh
+
+### Work-Energy Theorem
+Work done = Change in kinetic energy
+
+### Conservation of Energy
+Total mechanical energy remains constant in the absence of non-conservative forces.
+
+### Power
+Power = Work / Time
+P = W / t = F × v
+
+## Chapter 5: Rotational Motion
+
+### Angular Velocity
+ω = θ / t
+v = rω
+
+### Moment of Inertia
+I = Σ mr²
+
+### Torque
+τ = I × α
+τ = r × F
+
+### Angular Momentum
+L = I × ω
+
+## Important Formulas Summary
+
+| Quantity | Formula |
+|----------|---------|
+| Velocity | v = u + at |
+| Displacement | s = ut + ½at² |
+| Force | F = ma |
+| Kinetic Energy | KE = ½mv² |
+| Potential Energy | PE = mgh |
+| Power | P = W/t |
+| Momentum | p = mv |
+| Impulse | J = FΔt |
+
+---
+
+*Notes prepared for NEET 2024 preparation*
+*Focus on derivation and numerical problem solving*

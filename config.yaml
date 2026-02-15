@@ -1,0 +1,50 @@
+# Configuration for NEET Knowledge RAG System
+# Vector Database Settings
+vector_db:
+  type: chromadb  # chromadb, pinecone, qdrant
+  persist_dir: ./data/chroma_db
+
+# Embedding Settings
+embedding:
+  provider: huggingface  # huggingface, openai, google
+  model: sentence-transformers/all-MiniLM-L6-v2  # Free model
+  dimension: 384
+
+# LLM Settings
+llm:
+  provider: ollama  # ollama, openai, anthropic
+  model: llama3.2  # For Ollama
+  openai_model: gpt-4o-mini  # For OpenAI fallback
+
+# Processing Settings
+processing:
+  chunk_size: 1000
+  chunk_overlap: 200
+
+# Supported Content Types
+supported_types:
+  - pdf
+  - scanned_pdf
+  - youtube
+  - video
+  - audio
+  - text
+  - html
+  - markdown
+
+# Content Type Settings
+content:
+  ocr_enabled: true
+  ocr_language: eng+hin  # English + Hindi for NEET
+  youtube_language: en
+
+# RAG Settings
+rag:
+  retrieval_top_k: 5
+  similarity_threshold: 0.7
+
+# Paths
+paths:
+  data_dir: ./data
+  content_dir: ./data/content
+  test_data_dir: ./tests/test_data
