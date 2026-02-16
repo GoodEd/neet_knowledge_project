@@ -15,7 +15,7 @@ class NEETRAG:
         self,
         persist_directory: str = "./data/faiss_index",
         embedding_provider: str = "huggingface",
-        embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2",
+        embedding_model: str = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
         embedding_dimension: int = 384,
         llm_provider: str = "ollama",
         llm_model: str = "llama3.2",
@@ -181,10 +181,13 @@ class NEETRAG:
         """Extract source info from a retrieved document, including YouTube timestamps."""
         content = doc.page_content
         source = doc.metadata.get("source", "Unknown")
-        content_type = doc.metadata.get("content_type", "text")
+        # Check both content_type and source_type (batch-ingested docs use source_type)
+        content_type = doc.metadata.get("content_type") or doc.metadata.get(
+            "source_type", "text"
+        )
         title = doc.metadata.get("title", "")
         video_id = doc.metadata.get("video_id", "")
-        timestamp = doc.metadata.get("timestamp", 0)
+        timestamp = doc.metadata.get("start_time", 0)
 
         # Fallback: extract video_id from source URL if missing
         if content_type == "youtube" and not video_id and source:
