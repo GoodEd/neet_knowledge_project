@@ -99,6 +99,7 @@ class ContentProcessor:
                 "content_type": doc.metadata.get("source_type", "youtube"),
                 "timestamp": doc.metadata.get("start_time", 0),
                 "title": doc.metadata.get("title", ""),
+                "video_id": doc.metadata.get("video_id", ""),
             }
             for doc in docs
         ]

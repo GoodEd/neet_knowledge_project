@@ -1,6 +1,7 @@
 from typing import Dict, Any, List, Optional, Union
 from pathlib import Path
 import os
+import re
 
 from langchain_core.documents import Document
 
@@ -12,7 +13,7 @@ from .llm_manager import LLMManager, RAGPromptBuilder
 class NEETRAG:
     def __init__(
         self,
-        persist_directory: str = "./data/chroma_db",
+        persist_directory: str = "./data/faiss_index",
         embedding_provider: str = "huggingface",
         embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2",
         embedding_dimension: int = 384,
@@ -39,6 +40,31 @@ class NEETRAG:
 
         self.prompt_builder = RAGPromptBuilder()
         self._vectorstore_loaded = False
+
+    def ingest_processed_content(
+        self, processed_result: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Ingest content that has already been processed into chunks."""
+        chunked_docs = processed_result.get("chunked_documents", [])
+        source = processed_result.get("source", "Unknown")
+
+        if chunked_docs:
+            langchain_docs = self._convert_to_langchain_docs(chunked_docs)
+
+            try:
+                self.vector_manager.load_vectorstore()
+                self.vector_manager.add_documents(langchain_docs)
+            except:
+                self.vector_manager.create_vectorstore(langchain_docs)
+
+            self._vectorstore_loaded = True
+
+        return {
+            "source": source,
+            "status": "success",
+            "documents_processed": len(chunked_docs),
+            "processed_at": processed_result.get("processed_at"),
+        }
 
     def ingest_content(
         self, source: Union[str, List[str]], source_type: str = "auto"
@@ -116,6 +142,72 @@ class NEETRAG:
 
         return docs
 
+    @staticmethod
+    def _format_youtube_url(source: str, video_id: str, timestamp: float) -> str:
+        """Build a timestamped YouTube URL from metadata."""
+        seconds = int(timestamp)
+        if video_id and seconds > 0:
+            return f"https://www.youtube.com/watch?v={video_id}&t={seconds}s"
+        if video_id:
+            return f"https://www.youtube.com/watch?v={video_id}"
+        return source
+
+    @staticmethod
+    def _format_timestamp_label(seconds: float) -> str:
+        """Convert seconds to a human-readable mm:ss or hh:mm:ss label."""
+        total = int(seconds)
+        if total <= 0:
+            return ""
+        h, remainder = divmod(total, 3600)
+        m, s = divmod(remainder, 60)
+        if h > 0:
+            return f"{h}:{m:02d}:{s:02d}"
+        return f"{m}:{s:02d}"
+
+    @staticmethod
+    def _extract_video_id(url: str) -> str:
+        """Extract YouTube video ID from a URL."""
+        patterns = [
+            r"[?&]v=([a-zA-Z0-9_-]{11})",
+            r"youtu\.be/([a-zA-Z0-9_-]{11})",
+        ]
+        for pattern in patterns:
+            match = re.search(pattern, url)
+            if match:
+                return match.group(1)
+        return ""
+
+    def _build_source_info(self, doc: "Document") -> Dict[str, Any]:
+        """Extract source info from a retrieved document, including YouTube timestamps."""
+        content = doc.page_content
+        source = doc.metadata.get("source", "Unknown")
+        content_type = doc.metadata.get("content_type", "text")
+        title = doc.metadata.get("title", "")
+        video_id = doc.metadata.get("video_id", "")
+        timestamp = doc.metadata.get("timestamp", 0)
+
+        # Fallback: extract video_id from source URL if missing
+        if content_type == "youtube" and not video_id and source:
+            video_id = self._extract_video_id(source)
+
+        source_info = {
+            "content": content[:200] + "..." if len(content) > 200 else content,
+            "source": source,
+            "content_type": content_type,
+            "title": title,
+        }
+
+        # Add YouTube-specific fields
+        if content_type == "youtube" and video_id:
+            source_info["video_id"] = video_id
+            source_info["timestamp"] = timestamp
+            source_info["timestamp_url"] = self._format_youtube_url(
+                source, video_id, timestamp
+            )
+            source_info["timestamp_label"] = self._format_timestamp_label(timestamp)
+
+        return source_info
+
     def query(
         self, question: str, top_k: int = 5, include_sources: bool = True
     ) -> Dict[str, Any]:
@@ -153,16 +245,7 @@ class NEETRAG:
         except Exception as e:
             answer = f"Error generating answer: {str(e)}"
 
-        sources = []
-        for doc in relevant_docs:
-            source_info = {
-                "content": doc.page_content[:200] + "..."
-                if len(doc.page_content) > 200
-                else doc.page_content,
-                "source": doc.metadata.get("source", "Unknown"),
-                "content_type": doc.metadata.get("content_type", "text"),
-            }
-            sources.append(source_info)
+        sources = [self._build_source_info(doc) for doc in relevant_docs]
 
         return {"answer": answer, "sources": sources, "question": question}
 
@@ -189,14 +272,7 @@ class NEETRAG:
         except Exception as e:
             answer = f"Error generating answer: {str(e)}"
 
-        sources = []
-        for doc in relevant_docs:
-            sources.append(
-                {
-                    "source": doc.metadata.get("source", "Unknown"),
-                    "content_type": doc.metadata.get("content_type", "text"),
-                }
-            )
+        sources = [self._build_source_info(doc) for doc in relevant_docs]
 
         return {"answer": answer, "sources": sources}
 

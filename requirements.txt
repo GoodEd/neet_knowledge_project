@@ -5,9 +5,11 @@
 langchain>=0.3.0
 langchain-community>=0.3.0
 langchain-huggingface>=0.1.0
+langchain-openai>=0.3.0
+langchain-text-splitters>=0.3.0
 
-# Vector Database
-chromadb>=0.5.0
+# Vector Database (FAISS)
+faiss-cpu>=1.7.0
 
 # Document Processing
 pymupdf>=1.24.0  # PDF processing
@@ -19,6 +21,7 @@ pillow>=10.0.0   # Image processing
 # YouTube & Video
 youtube-transcript-api>=0.6.0  # YouTube transcripts
 yt-dlp>=2024.0.0   # Video downloading
+webvtt-py>=0.5.0    # VTT subtitle parsing
 
 # Web Content
 beautifulsoup4>=4.12.0  # HTML parsing
@@ -28,11 +31,14 @@ requests>=2.31.0   # HTTP requests
 python-dotenv>=1.0.0  # Environment variables
 tiktoken>=0.7.0    # Token counting
 
-# LLM Options
-ollama>=0.3.0   # Local LLM (free)
-openai>=1.0.0   # OpenAI API (optional)
-anthropic>=0.25.0  # Anthropic API (optional)
+# LLM Providers
+openai>=1.0.0   # OpenAI / OpenRouter API
+
+# Frontend
+streamlit>=1.30.0
 
 # Utilities
 numpy>=1.24.0
 pydantic>=2.0.0
+pyyaml>=6.0
+sentence-transformers>=2.2.0

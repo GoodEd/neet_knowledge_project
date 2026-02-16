@@ -9,6 +9,7 @@ venv/
 .venv/
 pip-log.txt
 pip-delete-this-directory.txt
+*.egg-info/
 
 # Environment Variables
 .env
@@ -17,13 +18,31 @@ pip-delete-this-directory.txt
 .env.test.local
 .env.production.local
 
-# Project Data
-chroma_db/
-data/
+# Project Data (generated at runtime)
+data/faiss_index/
+data/audio/
+data/content/
 logs/
+
+# Legacy vector store
+data/chroma_db/
+chroma_db/
+
+# Test/temp audio files
+*.mp3
+*.webm
+*.wav
+*.m4a
+*.flac
 
 # IDEs
 .vscode/
 .idea/
 *.swp
 .DS_Store
+
+# Ruff cache
+.ruff_cache/
+
+# Sisyphus
+.sisyphus/

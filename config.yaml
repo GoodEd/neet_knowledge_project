@@ -1,20 +1,20 @@
 # Configuration for NEET Knowledge RAG System
 # Vector Database Settings
 vector_db:
-  type: chromadb  # chromadb, pinecone, qdrant
-  persist_dir: ./data/chroma_db
+  type: faiss
+  persist_dir: ./data/faiss_index
 
 # Embedding Settings
 embedding:
-  provider: huggingface  # huggingface, openai, google
+  provider: huggingface  # huggingface, openai
   model: sentence-transformers/all-MiniLM-L6-v2  # Free model
   dimension: 384
 
 # LLM Settings
 llm:
-  provider: ollama  # ollama, openai, anthropic
-  model: llama3.2  # For Ollama
-  openai_model: gpt-4o-mini  # For OpenAI fallback
+  provider: openai  # ollama, openai, anthropic
+  model: google/gemini-2.0-flash-001  # For OpenRouter
+  base_url: https://openrouter.ai/api/v1
 
 # Processing Settings
 processing:

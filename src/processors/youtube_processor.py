@@ -80,7 +80,8 @@ class YouTubeProcessor:
             }
 
         except Exception as e:
-            logger.error(f"Error processing YouTube video {url}: {str(e)}")
+            error_msg = str(e)
+            logger.error(f"Error processing YouTube video {url}: {error_msg}")
 
             # 4. Fallback: Audio Download + Multimodal Chat (OpenRouter/Gemini)
             logger.info("Attempting AUDIO DOWNLOAD + MULTIMODAL CHAT fallback...")
@@ -100,7 +101,7 @@ class YouTubeProcessor:
             except Exception as audio_e:
                 logger.error(f"Audio fallback failed: {audio_e}")
 
-            raise RuntimeError(f"Failed to fetch transcript: {str(e)}")
+            raise RuntimeError(f"Failed to fetch transcript: {error_msg}")
 
     def _transcribe_with_multimodal_chat(
         self, url: str, video_title: str
@@ -336,7 +337,12 @@ class YouTubeProcessor:
             "skip_download": True,
             "writeautomaticsub": True,  # Download auto-generated subs
             "writesubtitles": True,  # Download manual subs
-            "subtitleslangs": ["en"],  # Prefer English
+            "subtitleslangs": [
+                "en",
+                "hi",
+                "en-IN",
+                "hi-IN",
+            ],  # English + Hindi fallback
             "outtmpl": "%(id)s",
             "quiet": True,
             "no_warnings": True,
@@ -391,22 +397,27 @@ class YouTubeProcessor:
 
                 except Exception as e:
                     logger.error(f"yt-dlp failed: {e}")
-            # Fallback to mock if available
-            mock_data = self._get_mock_transcript(self._extract_video_id(url))
+
+            # If we got transcript entries from VTT parsing, return them
+            if transcript_entries:
+                return transcript_entries
+
+            # Fallback to mock if available (for testing)
+            vid = self._extract_video_id(url)
+            mock_data = self._get_mock_transcript(vid) if vid else []
             if mock_data:
                 logger.warning(
                     f"Using MOCK transcript for {url} due to download failure."
                 )
                 return mock_data
 
-            # If no mock data and no audio fallback succeeded (or it wasn't attempted in this helper), raise.
-            # Ideally the fallback logic is in 'process', so this just raises.
-            raise RuntimeError(f"Failed to fetch transcript: {str(e)}")
+            # No transcript obtained by any method
+            raise RuntimeError(f"Failed to fetch transcript for {url}")
 
     def _get_mock_transcript(self, video_id: str) -> List[Dict[str, Any]]:
         """Return mock transcript for testing when YT is blocked."""
-        # Mock for Khan Academy Newton's Laws
-        if video_id in ["8mO00wEKKTE", "nXPX15FPfsE"]:
+        # Mock for Khan Academy Newton's Laws - keeping only one ID for testing if needed
+        if video_id in ["8mO00wEKKTE"]:
             return [
                 {
                     "text": "Hello everyone, welcome to this video on Newton's Laws of Motion.",
@@ -470,8 +481,6 @@ class YouTubeProcessor:
                 },
             ]
         return []
-
-        return transcript_entries
 
     def _vtt_time_to_seconds(self, time_str: str) -> float:
         """Convert VTT timestamp to seconds."""

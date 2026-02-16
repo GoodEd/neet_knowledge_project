@@ -7,6 +7,9 @@ Usage: python -m src.main [command] [options]
 import sys
 import os
 import argparse
+from dotenv import load_dotenv
+
+load_dotenv()
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -63,8 +66,19 @@ def cmd_query(args):
     if result.get("sources"):
         print("\nSources:")
         for i, src in enumerate(result["sources"], 1):
-            print(f"  {i}. {src.get('source', 'Unknown')}")
-            print(f"     Type: {src.get('content_type', 'text')}")
+            content_type = src.get("content_type", "text")
+            if content_type == "youtube" and src.get("timestamp_url"):
+                title = src.get("title", "")
+                ts_label = src.get("timestamp_label", "")
+                display = title or src.get("source", "Unknown")
+                if ts_label:
+                    print(f"  {i}. [YouTube] {display} @ {ts_label}")
+                else:
+                    print(f"  {i}. [YouTube] {display}")
+                print(f"     Link: {src['timestamp_url']}")
+            else:
+                print(f"  {i}. {src.get('source', 'Unknown')}")
+                print(f"     Type: {content_type}")
 
 
 def cmd_stats(args):
@@ -223,7 +237,7 @@ def main():
     )
 
     parser.add_argument(
-        "--persist-dir", default="./data/chroma_db", help="Vector database directory"
+        "--persist-dir", default="./data/faiss_index", help="Vector database directory"
     )
     parser.add_argument(
         "--embedding-provider",
@@ -238,13 +252,19 @@ def main():
     )
     parser.add_argument(
         "--llm-provider",
-        default="ollama",
+        default="openai",
         choices=["ollama", "openai", "anthropic"],
-        help="LLM provider",
+        help="LLM provider (default: openai for OpenRouter compatibility)",
     )
-    parser.add_argument("--llm-model", default="llama3.2", help="LLM model name")
     parser.add_argument(
-        "--llm-base-url", default=None, help="LLM base URL (e.g. for OpenRouter)"
+        "--llm-model",
+        default=os.getenv("OPENAI_MODEL_NAME", "google/gemini-2.0-flash-001"),
+        help="LLM model name",
+    )
+    parser.add_argument(
+        "--llm-base-url",
+        default=os.getenv("OPENAI_BASE_URL", "https://openrouter.ai/api/v1"),
+        help="LLM base URL (default: from OPENAI_BASE_URL env var)",
     )
 
     subparsers = parser.add_subparsers(dest="command", help="Commands")

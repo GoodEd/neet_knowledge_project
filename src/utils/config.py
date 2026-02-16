@@ -25,7 +25,7 @@ class Config:
 
     def _default_config(self) -> Dict[str, Any]:
         return {
-            "vector_db": {"type": "chromadb", "persist_dir": "./data/chroma_db"},
+            "vector_db": {"type": "faiss", "persist_dir": "./data/faiss_index"},
             "embedding": {
                 "provider": "huggingface",
                 "model": "sentence-transformers/all-MiniLM-L6-v2",
@@ -53,11 +53,11 @@ class Config:
 
     @property
     def vector_db_type(self) -> str:
-        return self.get("vector_db.type", "chromadb")
+        return self.get("vector_db.type", "faiss")
 
     @property
-    def chroma_persist_dir(self) -> str:
-        return self.get("vector_db.persist_dir", "./data/chroma_db")
+    def persist_dir(self) -> str:
+        return self.get("vector_db.persist_dir", "./data/faiss_index")
 
     @property
     def embedding_provider(self) -> str:

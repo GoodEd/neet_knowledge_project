@@ -179,7 +179,7 @@ class AutoUpdater:
 
             # Re-ingest to vector store
             if result.get("chunked_documents"):
-                self.rag.ingest_content([source.url])
+                self.rag.ingest_processed_content(result)
 
             self.source_manager.mark_fetched(source_id, success=True)
 

@@ -97,7 +97,7 @@ class TestVectorStore(unittest.TestCase):
 
     def test_vectorstore_creation(self):
         from src.rag import VectorStoreManager
-        from langchain.schema import Document
+        from langchain_core.documents import Document
 
         manager = VectorStoreManager(
             persist_directory=self.test_dir,
@@ -122,7 +122,7 @@ class TestVectorStore(unittest.TestCase):
 
     def test_similarity_search(self):
         from src.rag import VectorStoreManager
-        from langchain.schema import Document
+        from langchain_core.documents import Document
 
         manager = VectorStoreManager(
             persist_directory=self.test_dir,
@@ -183,7 +183,7 @@ class TestRAGSystem(unittest.TestCase):
 class TestPromptBuilder(unittest.TestCase):
     def test_build_prompt(self):
         from src.rag import RAGPromptBuilder
-        from langchain.schema import Document
+        from langchain_core.documents import Document
 
         builder = RAGPromptBuilder()
 
@@ -203,7 +203,7 @@ class TestPromptBuilder(unittest.TestCase):
 
     def test_build_with_sources(self):
         from src.rag import RAGPromptBuilder
-        from langchain.schema import Document
+        from langchain_core.documents import Document
 
         builder = RAGPromptBuilder()
 

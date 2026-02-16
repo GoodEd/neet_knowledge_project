@@ -50,14 +50,14 @@ class PDFProcessor:
                     documents.append(
                         {
                             "content": text,
-                            "source": str(file_path.name),
+                            "source": str(file_path_obj.name),
                             "page": page_num + 1,
                             "content_type": "pdf_text",
                             "timestamp": datetime.now().isoformat(),
                         }
                     )
                 elif self.ocr_enabled:
-                    ocr_text = self._process_ocr(page, page_num + 1, file_path.name)
+                    ocr_text = self._process_ocr(page, page_num + 1, file_path_obj.name)
                     if ocr_text:
                         documents.append(ocr_text)
 
@@ -67,7 +67,7 @@ class PDFProcessor:
 
         return {
             "documents": documents,
-            "source": str(file_path.name),
+            "source": str(file_path_obj.name),
             "total_pages": len(documents),
             "processed_at": datetime.now().isoformat(),
         }

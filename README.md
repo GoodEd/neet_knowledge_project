@@ -1,28 +1,30 @@
 # NEET Knowledge RAG
 
-A comprehensive Retrieval-Augmented Generation (RAG) system for NEET aspirants in India. Supports multiple content types including PDFs, scanned PDFs, YouTube videos, regular videos, text notes, and HTML pages.
+A comprehensive Retrieval-Augmented Generation (RAG) system for NEET aspirants in India. Supports multiple content types including PDFs, YouTube videos, text notes, and HTML pages.
 
 ## Features
 
-- **Multi-format Support**: Process PDFs, scanned PDFs, YouTube videos, audio/video files, text files, Markdown, and HTML
+- **Multi-format Support**: Process PDFs, YouTube videos, audio/video files, text files, Markdown, and HTML
 - **Flexible RAG Pipeline**: Uses LangChain for robust document processing and retrieval
-- **Multiple Embedding Options**: HuggingFace (free), OpenAI (paid)
-- **Multiple LLM Options**: Ollama (free/local), OpenAI, Anthropic
-- **Vector Storage**: ChromaDB for efficient similarity search
-- **Easy CLI**: Simple commands for ingestion, querying, and interaction
+- **Local Embeddings**: HuggingFace `all-MiniLM-L6-v2` (free, no API key needed)
+- **LLM via OpenRouter**: Gemini Flash 2.0 (or any OpenAI-compatible provider)
+- **Vector Storage**: FAISS for efficient similarity search
+- **YouTube Audio Fallback**: When subtitles are blocked, downloads audio and transcribes via Gemini multimodal
+- **Streamlit Frontend**: Web UI for managing sources and chatting with your knowledge base
+- **CLI**: Full command-line interface for ingestion, querying, and source management
 
 ## Architecture
 
 ```
 ┌─────────────────┐     ┌──────────────────┐     ┌─────────────────┐
-│  Content        │────▶│  Processing      │────▶│  Vector Store   │
-│  Sources        │     │  (Chunking)      │     │  (ChromaDB)     │
-└─────────────────┘     └──────────────────┘     └────────┬────────┘
-                                                           │
-                                                           ▼
+│  Content         │────▶│  Processing      │────▶│  Vector Store   │
+│  Sources         │     │  (Chunking)      │     │  (FAISS)        │
+│  (YT/PDF/Text)   │     └──────────────────┘     └────────┬────────┘
+└─────────────────┘                                         │
+                                                            ▼
 ┌─────────────────┐     ┌──────────────────┐     ┌─────────────────┐
-│  User Query     │────▶│  Retrieval       │────▶│  LLM Response   │
-│                 │     │  (Similarity)    │     │  (Generation)   │
+│  User Query      │────▶│  Retrieval       │────▶│  LLM Response   │
+│  (CLI/Streamlit) │     │  (Similarity)    │     │  (Generation)   │
 └─────────────────┘     └──────────────────┘     └─────────────────┘
 ```
 
@@ -33,214 +35,145 @@ A comprehensive Retrieval-Augmented Generation (RAG) system for NEET aspirants i
 git clone <repository-url>
 cd neet_knowledge_project
 
+# Create virtual environment
+python -m venv venv
+source venv/bin/activate  # Linux/Mac
+# venv\Scripts\activate   # Windows
+
 # Install dependencies
 pip install -r requirements.txt
 
-# Optional: Install additional dependencies
-# For OCR support
-pip install pytesseract
+# Copy and configure environment
+cp .env.example .env
+# Edit .env with your API keys
+```
 
-# For video transcription
-pip install openai-whisper
+## Configuration
 
-# For YouTube support
-pip install youtube-transcript-api
+Edit `.env` with your API keys:
 
-# For PDF support
-pip install pymupdf pypdf
+```bash
+# Required: OpenRouter or OpenAI API key
+OPENAI_API_KEY=sk-or-v1-your-key-here
+OPENAI_BASE_URL=https://openrouter.ai/api/v1
+OPENAI_MODEL_NAME=google/gemini-2.0-flash-001
+
+# Optional: YouTube Data API for better metadata
+YOUTUBE_API_KEY=your-youtube-api-key
 ```
 
 ## Quick Start
 
-### 1. Ingest Content
+### Option 1: Streamlit Web UI (Recommended for Demo)
 
 ```bash
-# Ingest a text file
-python -m src.main ingest ./tests/test_data/text/physics_notes.txt
+streamlit run app.py
+```
 
-# Ingest multiple files
-python -m src.main ingest ./notes/*.txt
+This opens a web interface where you can:
+- Add YouTube URLs or PDF paths via the sidebar
+- Click "Update/Ingest All Sources" to process them
+- Chat with your knowledge base in the main panel
+
+### Option 2: CLI
+
+```bash
+# Ingest test data (text files)
+python -m src.main ingest ./tests/test_data/text/physics_notes.txt
+python -m src.main ingest ./tests/test_data/text/chemistry_notes.md
+python -m src.main ingest ./tests/test_data/html/biology_cell.html
 
 # Ingest a YouTube video
-python -m src.main ingest "https://www.youtube.com/watch?v=..."
+python -m src.main ingest "https://www.youtube.com/watch?v=VIDEO_ID"
 
-# Ingest an HTML page
-python -m src.main ingest ./notes/biology.html
-```
-
-### 2. Query the Knowledge Base
-
-```bash
-# Ask a question
+# Query the knowledge base
 python -m src.main query "What are Newton's laws of motion?"
 
-# With custom top-k results
-python -m src.main query "Explain photosynthesis" --top-k 3
-```
-
-### 3. Interactive Chat
-
-```bash
-# Start interactive chat mode
+# Interactive chat
 python -m src.main chat
-```
 
-### 4. Check Statistics
-
-```bash
-# View system statistics
+# Check system stats
 python -m src.main stats
 ```
 
-## Python API Usage
+### Source Management (CLI)
 
-```python
-from src.rag import NEETRAG
+```bash
+# Add a YouTube source for periodic updates
+python -m src.main source add youtube "https://youtube.com/watch?v=..." --title "Physics Lecture"
 
-# Initialize RAG system
-rag = NEETRAG(
-    persist_directory="./data/chroma_db",
-    embedding_provider="huggingface",
-    embedding_model="sentence-transformers/all-MiniLM-L6-v2",
-    llm_provider="ollama",
-    llm_model="llama3.2"
-)
+# List all tracked sources
+python -m src.main source list
 
-# Ingest content
-rag.ingest_content([
-    "./notes/physics.txt",
-    "./notes/chemistry.md",
-    "https://youtube.com/watch?v=..."
-])
+# Update all sources that need refresh
+python -m src.main source update
 
-# Query
-result = rag.query("What is the formula for kinetic energy?")
-print(result["answer"])
+# Remove a source
+python -m src.main source remove <source_id>
 ```
 
 ## Supported Content Types
 
-| Type | Extension | Processing |
-|------|-----------|------------|
+| Type | Extension/Format | Processing |
+|------|-----------------|------------|
 | Text | .txt | Direct text extraction |
 | Markdown | .md, .markdown | Section-based extraction |
 | HTML | .html, .htm | Main content extraction |
-| PDF | .pdf | Text extraction + OCR |
-| YouTube | URL | Transcript extraction |
-| Video | .mp4, .avi, .mov | Audio transcription (with Whisper) |
+| PDF | .pdf | Text extraction + OCR fallback |
+| YouTube | URL | Subtitles → Audio download → Gemini transcription |
+| Video | .mp4, .avi, .mov | Audio transcription |
 | Audio | .mp3, .wav | Speech-to-text |
-
-## Configuration
-
-Edit `config.yaml` to customize:
-
-```yaml
-vector_db:
-  type: chromadb
-  persist_dir: ./data/chroma_db
-
-embedding:
-  provider: huggingface
-  model: sentence-transformers/all-MiniLM-L6-v2
-
-llm:
-  provider: ollama
-  model: llama3.2
-
-processing:
-  chunk_size: 1000
-  chunk_overlap: 200
-
-rag:
-  retrieval_top_k: 5
-  similarity_threshold: 0.7
-```
-
-## Provider Options
-
-### Embeddings
-
-| Provider | Cost | Quality | Setup |
-|----------|------|---------|-------|
-| HuggingFace | Free | Good | None |
-| OpenAI | Paid | Excellent | API key |
-
-### LLM
-
-| Provider | Cost | Quality | Setup |
-|----------|------|---------|-------|
-| Ollama | Free | Good | Install locally |
-| OpenAI | Paid | Excellent | API key |
-| Anthropic | Paid | Excellent | API key |
-
-## Running Tests
-
-```bash
-cd tests
-python test_rag.py
-```
 
 ## Project Structure
 
 ```
 neet_knowledge_project/
-├── config.yaml              # Configuration file
-├── requirements.txt         # Dependencies
+├── app.py                    # Streamlit web frontend
+├── config.yaml               # Configuration file
+├── requirements.txt          # Python dependencies
+├── .env.example              # Environment variable template
 ├── src/
-│   ├── main.py             # CLI entry point
-│   ├── processors/         # Content processors
+│   ├── main.py              # CLI entry point
+│   ├── processors/          # Content processors
 │   │   ├── pdf_processor.py
 │   │   ├── youtube_processor.py
 │   │   ├── text_processor.py
 │   │   ├── html_processor.py
 │   │   ├── video_processor.py
-│   │   └── unified.py
-│   ├── rag/                # RAG system
-│   │   ├── vector_store.py
-│   │   ├── llm_manager.py
-│   │   └── neet_rag.py
+│   │   └── unified.py       # ContentProcessor router
+│   ├── rag/                 # RAG system
+│   │   ├── vector_store.py  # FAISS vector store manager
+│   │   ├── llm_manager.py   # LLM provider abstraction
+│   │   └── neet_rag.py      # Main RAG orchestrator
 │   └── utils/
-│       └── config.py
+│       ├── config.py        # YAML config loader
+│       └── content_manager.py  # Source tracking + auto-updater
 ├── tests/
-│   ├── test_rag.py
-│   └── test_data/
-│       ├── text/
-│       ├── html/
-│       └── pdf/
+│   ├── test_rag.py          # Unit tests
+│   └── test_data/           # Sample NEET content
+│       ├── text/            # Physics & Chemistry notes
+│       └── html/            # Biology notes
 └── data/
-    └── chroma_db/         # Vector database
+    ├── sources.json         # Tracked content sources
+    ├── faiss_index/         # FAISS vector database (generated)
+    └── audio/               # Cached audio downloads (generated)
+```
+
+## Running Tests
+
+```bash
+python tests/test_rag.py
 ```
 
 ## Environment Variables
 
-```bash
-# For OpenAI embeddings/LLM
-export OPENAI_API_KEY=your_key_here
-
-# For Anthropic
-export ANTHROPIC_API_KEY=your_key_here
-
-# For Ollama (if using custom URL)
-export OLLAMA_BASE_URL=http://localhost:11434
-```
-
-## Troubleshooting
-
-### No content found
-- Ensure you've ingested content first using `ingest` command
-
-### LLM not responding
-- If using Ollama, ensure it's running: `ollama serve`
-- If using OpenAI, check your API key
-
-### Embedding errors
-- Ensure sentence-transformers is installed
-- For CPU, the default model works well
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `OPENAI_API_KEY` | Yes | OpenRouter or OpenAI API key |
+| `OPENAI_BASE_URL` | No | API base URL (default: OpenRouter) |
+| `OPENAI_MODEL_NAME` | No | LLM model (default: gemini-2.0-flash) |
+| `YOUTUBE_API_KEY` | No | YouTube Data API v3 key for metadata |
 
 ## License
 
 MIT License
-
-## Contributing
-
-Contributions are welcome! Please open an issue or submit a pull request.

@@ -12,9 +12,9 @@ from langchain_openai import OpenAIEmbeddings
 class VectorStoreManager:
     def __init__(
         self,
-        persist_directory: str = "./data/chroma_db",
+        persist_directory: str = "./data/faiss_index",
         embedding_provider: str = "huggingface",
-        embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2",
+        embedding_model: str = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
         embedding_dimension: int = 384,
     ):
         self.persist_directory = persist_directory
