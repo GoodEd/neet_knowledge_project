@@ -19,13 +19,10 @@ pip-delete-this-directory.txt
 .env.production.local
 
 # Project Data (generated at runtime)
-data/faiss_index/
-data/audio/
-data/content/
+data/
 logs/
 
 # Legacy vector store
-data/chroma_db/
 chroma_db/
 
 # Test/temp audio files
@@ -40,6 +37,11 @@ chroma_db/
 .idea/
 *.swp
 .DS_Store
+
+# Screenshots / images
+*.png
+*.jpg
+*.jpeg
 
 # Ruff cache
 .ruff_cache/
