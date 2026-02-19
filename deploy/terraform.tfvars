@@ -52,6 +52,11 @@ redis_auth_token         = null
 # Health checks
 health_check_path = "/"
 
+# CodePipeline / GitHub
+codestar_connection_arn = "arn:aws:codestar-connections:ap-south-1:559387212220:connection/REPLACE_WITH_YOUR_CONNECTION_ARN"
+github_repo_id          = "GoodEd/neet_knowledge_project"
+github_branch           = "feature/aws_deployment" # or "main"
+
 tags = {
   Project     = "neet-knowledge"
   Environment = "dev"

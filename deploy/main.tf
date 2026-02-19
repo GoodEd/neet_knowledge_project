@@ -327,6 +327,11 @@ resource "aws_ecs_task_definition" "streamlit" {
   execution_role_arn       = aws_iam_role.ecs_execution.arn
   task_role_arn            = aws_iam_role.ecs_task.arn
 
+  runtime_platform {
+    operating_system_family = "LINUX"
+    cpu_architecture        = "ARM64"
+  }
+
   volume {
     name = "shared-data"
 
@@ -396,6 +401,11 @@ resource "aws_ecs_task_definition" "worker" {
   memory                   = "2048"
   execution_role_arn       = aws_iam_role.ecs_execution.arn
   task_role_arn            = aws_iam_role.ecs_task.arn
+
+  runtime_platform {
+    operating_system_family = "LINUX"
+    cpu_architecture        = "ARM64"
+  }
 
   volume {
     name = "shared-data"
@@ -560,15 +570,301 @@ resource "aws_appautoscaling_policy" "worker_sqs" {
   }
 }
 
-resource "aws_route53_record" "app" {
-  count   = var.create_dns_record ? 1 : 0
-  zone_id = data.aws_route53_zone.main[0].zone_id
-  name    = var.app_fqdn
-  type    = "A"
 
-  alias {
-    name                   = data.aws_lb.shared.dns_name
-    zone_id                = data.aws_lb.shared.zone_id
-    evaluate_target_health = true
+resource "aws_ecr_repository" "streamlit" {
+  name                 = "${local.name_prefix}-streamlit"
+  image_tag_mutability = "MUTABLE"
+
+  image_scanning_configuration {
+    scan_on_push = true
   }
+
+  tags = local.common_tags
 }
+
+resource "aws_ecr_repository" "worker" {
+  name                 = "${local.name_prefix}-worker"
+  image_tag_mutability = "MUTABLE"
+
+  image_scanning_configuration {
+    scan_on_push = true
+  }
+
+  tags = local.common_tags
+}
+
+resource "aws_codebuild_project" "build" {
+  name          = "${local.name_prefix}-build"
+  description   = "Builds Docker images for ${local.name_prefix}"
+  build_timeout = "60"
+  service_role  = aws_iam_role.codebuild.arn
+
+  artifacts {
+    type = "CODEPIPELINE"
+  }
+
+  environment {
+    compute_type                = "BUILD_GENERAL1_SMALL"
+    image                       = "aws/codebuild/amazonlinux2-aarch64-standard:3.0"
+    type                        = "ARM_CONTAINER"
+    image_pull_credentials_type = "CODEBUILD"
+    privileged_mode             = true
+
+    environment_variable {
+      name  = "AWS_DEFAULT_REGION"
+      value = var.aws_region
+    }
+    environment_variable {
+      name  = "AWS_ACCOUNT_ID"
+      value = data.aws_caller_identity.current.account_id
+    }
+    environment_variable {
+      name  = "IMAGE_REPO_NAME_STREAMLIT"
+      value = aws_ecr_repository.streamlit.name
+    }
+    environment_variable {
+      name  = "IMAGE_REPO_NAME_WORKER"
+      value = aws_ecr_repository.worker.name
+    }
+    environment_variable {
+      name  = "IMAGE_TAG"
+      value = "latest"
+    }
+  }
+
+  source {
+    type      = "CODEPIPELINE"
+    buildspec = "buildspec.yml"
+  }
+
+  tags = local.common_tags
+}
+
+resource "aws_codepipeline" "main" {
+  name     = "${local.name_prefix}-pipeline"
+  role_arn = aws_iam_role.codepipeline.arn
+
+  artifact_store {
+    location = aws_s3_bucket.codepipeline.bucket
+    type     = "S3"
+  }
+
+  stage {
+    name = "Source"
+
+    action {
+      name             = "Source"
+      category         = "Source"
+      owner            = "AWS"
+      provider         = "CodeStarSourceConnection"
+      version          = "1"
+      output_artifacts = ["source_output"]
+
+      configuration = {
+        ConnectionArn    = var.codestar_connection_arn
+        FullRepositoryId = var.github_repo_id
+        BranchName       = var.github_branch
+      }
+    }
+  }
+
+  stage {
+    name = "Build"
+
+    action {
+      name             = "Build"
+      category         = "Build"
+      owner            = "AWS"
+      provider         = "CodeBuild"
+      input_artifacts  = ["source_output"]
+      output_artifacts = ["build_output"]
+      version          = "1"
+
+      configuration = {
+        ProjectName = aws_codebuild_project.build.name
+      }
+    }
+  }
+
+  stage {
+    name = "Deploy"
+
+    action {
+      name            = "DeployStreamlit"
+      category        = "Deploy"
+      owner           = "AWS"
+      provider        = "ECS"
+      input_artifacts = ["build_output"]
+      version         = "1"
+
+      configuration = {
+        ClusterName = data.aws_ecs_cluster.shared.cluster_name
+        ServiceName = aws_ecs_service.streamlit.name
+        FileName    = "imagedefinitions_streamlit.json"
+      }
+    }
+
+    action {
+      name            = "DeployWorker"
+      category        = "Deploy"
+      owner           = "AWS"
+      provider        = "ECS"
+      input_artifacts = ["build_output"]
+      version         = "1"
+
+      configuration = {
+        ClusterName = data.aws_ecs_cluster.shared.cluster_name
+        ServiceName = aws_ecs_service.worker.name
+        FileName    = "imagedefinitions_worker.json"
+      }
+    }
+  }
+
+  tags = local.common_tags
+}
+
+resource "aws_s3_bucket" "codepipeline" {
+  bucket = "${local.name_prefix}-codepipeline"
+  tags   = local.common_tags
+}
+
+resource "aws_iam_role" "codebuild" {
+  name = "${local.name_prefix}-codebuild"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = "sts:AssumeRole"
+        Effect = "Allow"
+        Principal = {
+          Service = "codebuild.amazonaws.com"
+        }
+      }
+    ]
+  })
+  tags = local.common_tags
+}
+
+resource "aws_iam_role_policy" "codebuild" {
+  role = aws_iam_role.codebuild.name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Resource = [
+          "*"
+        ]
+        Action = [
+          "logs:CreateLogGroup",
+          "logs:CreateLogStream",
+          "logs:PutLogEvents"
+        ]
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "s3:GetObject",
+          "s3:GetObjectVersion",
+          "s3:PutObject"
+        ]
+        Resource = [
+          aws_s3_bucket.codepipeline.arn,
+          "${aws_s3_bucket.codepipeline.arn}/*"
+        ]
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "ecr:GetAuthorizationToken",
+          "ecr:BatchCheckLayerAvailability",
+          "ecr:GetDownloadUrlForLayer",
+          "ecr:GetRepositoryPolicy",
+          "ecr:DescribeRepositories",
+          "ecr:ListImages",
+          "ecr:DescribeImages",
+          "ecr:BatchGetImage",
+          "ecr:InitiateLayerUpload",
+          "ecr:UploadLayerPart",
+          "ecr:CompleteLayerUpload",
+          "ecr:PutImage"
+        ]
+        Resource = "*"
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role" "codepipeline" {
+  name = "${local.name_prefix}-codepipeline"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = "sts:AssumeRole"
+        Effect = "Allow"
+        Principal = {
+          Service = "codepipeline.amazonaws.com"
+        }
+      }
+    ]
+  })
+  tags = local.common_tags
+}
+
+resource "aws_iam_role_policy" "codepipeline" {
+  role = aws_iam_role.codepipeline.name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "s3:GetObject",
+          "s3:GetObjectVersion",
+          "s3:PutObject",
+          "s3:GetBucketVersioning"
+        ]
+        Resource = [
+          aws_s3_bucket.codepipeline.arn,
+          "${aws_s3_bucket.codepipeline.arn}/*"
+        ]
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "codebuild:BatchGetBuilds",
+          "codebuild:StartBuild"
+        ]
+        Resource = "*"
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "codestar-connections:UseConnection"
+        ]
+        Resource = var.codestar_connection_arn
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "ecs:*"
+        ]
+        Resource = "*"
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "iam:PassRole"
+        ]
+        Resource = "*"
+      }
+    ]
+  })
+}
+
+data "aws_caller_identity" "current" {}

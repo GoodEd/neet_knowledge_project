@@ -144,6 +144,22 @@ variable "health_check_path" {
   default = "/"
 }
 
+variable "codestar_connection_arn" {
+  description = "ARN of CodeStar connection for GitHub"
+  type        = string
+}
+
+variable "github_repo_id" {
+  description = "GitHub repository ID (owner/repo)"
+  type        = string
+}
+
+variable "github_branch" {
+  description = "GitHub branch to track"
+  type        = string
+  default     = "main"
+}
+
 variable "tags" {
   type    = map(string)
   default = {}
