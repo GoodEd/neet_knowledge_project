@@ -1,0 +1,23 @@
+# Dockerfile.worker
+FROM python:3.11-slim
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    ffmpeg \
+    tesseract-ocr \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY . .
+
+# EFS mount point
+ENV DATA_DIR=/shared/data
+RUN mkdir -p ${DATA_DIR}/faiss_index ${DATA_DIR}/content ${DATA_DIR}/audio
+
+ENV PYTHONUNBUFFERED=1
+
+CMD ["python", "-m", "src.main", "worker"]
