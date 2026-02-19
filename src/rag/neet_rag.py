@@ -20,11 +20,16 @@ class NEETRAG:
         llm_provider: str = "ollama",
         llm_model: str = "llama3.2",
         llm_base_url: Optional[str] = None,
-        chunk_size: int = 1000,
-        chunk_overlap: int = 200,
+        chunk_size: Optional[int] = None,
+        chunk_overlap: Optional[int] = None,
     ):
+        from src.utils.config import Config
+
+        config = Config()
+
         self.content_processor = ContentProcessor(
-            chunk_size=chunk_size, chunk_overlap=chunk_overlap
+            chunk_size=chunk_size or config.chunk_size,
+            chunk_overlap=chunk_overlap or config.chunk_overlap,
         )
 
         self.vector_manager = VectorStoreManager(

@@ -499,61 +499,149 @@ class YouTubeProcessor:
     def _create_documents(
         self, transcript_data: List[Dict[str, Any]], url: str, video_id: str
     ) -> List[Document]:
-        """
-        Group transcript entries into chunks (Documents).
-        """
         documents = []
         if not transcript_data:
             return documents
 
+        from src.utils.config import Config
+
+        config = Config()
+        chunk_size = config.get("processing.chunk_size", 1000)
+        chunk_overlap = config.get("processing.chunk_overlap", 200)
+
         video_title = transcript_data[0].get("video_title", "Unknown Video")
 
-        # Simple chunking: Group by time (e.g., every 60 seconds) or token count
-        # Here we'll group by accumulated character count (~500 chars)
+        i = 0
+        while i < len(transcript_data):
+            chunk_text_parts = []
+            chunk_start_time = transcript_data[i]["start"]
+            chunk_length = 0
 
-        current_chunk_text = []
-        current_chunk_start = transcript_data[0]["start"]
-        current_char_count = 0
-        CHUNK_SIZE = 1000  # Characters per chunk
+            j = i
+            while j < len(transcript_data):
+                text = transcript_data[j]["text"]
+                text_len = len(text)
 
-        for entry in transcript_data:
-            text = entry["text"]
-            start = entry["start"]
+                if chunk_length + text_len > chunk_size and chunk_text_parts:
+                    break
 
-            # Add text to current chunk
-            current_chunk_text.append(text)
-            current_char_count += len(text)
+                chunk_text_parts.append(text)
+                chunk_length += text_len
+                j += 1
 
-            # Check if chunk is full
-            if current_char_count >= CHUNK_SIZE:
-                # Create document
-                chunk_text = " ".join(current_chunk_text)
-                meta = {
-                    "source": url,
-                    "video_id": video_id,
-                    "title": video_title,
-                    "start_time": current_chunk_start,
-                    "source_type": "youtube",
-                }
-                documents.append(Document(page_content=chunk_text, metadata=meta))
-
-                # Reset
-                current_chunk_text = []
-                current_chunk_start = (
-                    start  # Approximate start of next chunk (actually current entry)
-                )
-                current_char_count = 0
-
-        # Add remaining text
-        if current_chunk_text:
-            chunk_text = " ".join(current_chunk_text)
+            chunk_text = " ".join(chunk_text_parts)
             meta = {
                 "source": url,
                 "video_id": video_id,
                 "title": video_title,
-                "start_time": current_chunk_start,
+                "start_time": chunk_start_time,
                 "source_type": "youtube",
             }
             documents.append(Document(page_content=chunk_text, metadata=meta))
+
+            if j == len(transcript_data):
+                break
+
+            chars_to_advance = max(1, chunk_length - chunk_overlap)
+
+            advanced_chars = 0
+            next_i = i
+            while next_i < j and advanced_chars < chars_to_advance:
+                advanced_chars += len(transcript_data[next_i]["text"])
+                next_i += 1
+
+            if next_i == i:
+                next_i += 1
+
+            i = next_i
+
+        return documents
+
+        # Get chunk settings from config or defaults
+        from src.utils.config import Config
+
+        config = Config()
+        chunk_size = config.get("processing.chunk_size", 1000)
+        chunk_overlap = config.get("processing.chunk_overlap", 200)
+
+        video_title = transcript_data[0].get("video_title", "Unknown Video")
+
+        # Accumulate full text with mapping to timestamps
+        full_text_segments = []
+        full_text = ""
+
+        # Build a single string but keep track of start times for each segment
+        # This is a simplification; for precise timestamps per chunk, we need better mapping.
+        # Strategy:
+        # 1. Iterate through transcript segments.
+        # 2. Accumulate text.
+        # 3. Use RecursiveCharacterTextSplitter on the full text (best for semantic context).
+        # 4. Map chunk start index back to timestamp (approximate but workable).
+
+        # Better Strategy for Audio:
+        # Accumulate segments until chunk_size is reached, but maintain an overlap window.
+
+        current_chunk_segments = []
+        current_chunk_len = 0
+
+        # We need a sliding window approach over segments
+        # But segments vary in length.
+        # Let's stick to the current logic but add overlap capability.
+
+        i = 0
+        while i < len(transcript_data):
+            chunk_text_parts = []
+            chunk_start_time = transcript_data[i]["start"]
+            chunk_length = 0
+
+            # Start a new chunk from index i
+            j = i
+            while j < len(transcript_data):
+                text = transcript_data[j]["text"]
+                text_len = len(text)
+
+                # If adding this segment exceeds chunk_size AND we have at least one segment
+                if chunk_length + text_len > chunk_size and chunk_text_parts:
+                    break
+
+                chunk_text_parts.append(text)
+                chunk_length += text_len
+                j += 1
+
+            # Create document for this window
+            chunk_text = " ".join(chunk_text_parts)
+            meta = {
+                "source": url,
+                "video_id": video_id,
+                "title": video_title,
+                "start_time": chunk_start_time,
+                "source_type": "youtube",
+            }
+            documents.append(Document(page_content=chunk_text, metadata=meta))
+
+            # Advance i.
+            # If no overlap, we'd set i = j.
+            # With overlap, we want to start the next chunk 'chunk_overlap' characters *before* the end of this chunk.
+            # But we are working with discrete segments.
+            # Let's find the segment index that starts closest to (chunk_length - overlap) from the current start.
+
+            if j == len(transcript_data):
+                break  # Done processing
+
+            # Calculate where the next chunk should conceptually start to satisfy overlap
+            chars_to_advance = max(1, chunk_length - chunk_overlap)
+
+            # Find how many segments cover 'chars_to_advance'
+            advanced_chars = 0
+            next_i = i
+            while next_i < j and advanced_chars < chars_to_advance:
+                advanced_chars += len(transcript_data[next_i]["text"])
+                next_i += 1
+
+            # Ensure we always advance at least one segment to avoid infinite loops if segments are huge
+            if next_i == i:
+                next_i += 1
+
+            i = next_i
 
         return documents

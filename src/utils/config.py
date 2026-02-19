@@ -65,7 +65,10 @@ class Config:
 
     @property
     def embedding_model(self) -> str:
-        return self.get("embedding.model", "sentence-transformers/all-MiniLM-L6-v2")
+        return self.get(
+            "embedding.model",
+            "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+        )
 
     @property
     def embedding_dimension(self) -> int:
@@ -81,11 +84,11 @@ class Config:
 
     @property
     def chunk_size(self) -> int:
-        return self.get("processing.chunk_size", 1000)
+        return self.get("processing.chunk_size", 400)
 
     @property
     def chunk_overlap(self) -> int:
-        return self.get("processing.chunk_overlap", 200)
+        return self.get("processing.chunk_overlap", 80)
 
     @property
     def retrieval_top_k(self) -> int:
