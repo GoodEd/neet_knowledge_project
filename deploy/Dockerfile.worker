@@ -20,4 +20,4 @@ RUN mkdir -p ${DATA_DIR}/faiss_index ${DATA_DIR}/content ${DATA_DIR}/audio
 
 ENV PYTHONUNBUFFERED=1
 
-CMD ["python", "-m", "src.main", "worker"]
+CMD ["python", "-m", "src.worker"]
