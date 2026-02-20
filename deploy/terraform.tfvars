@@ -63,3 +63,6 @@ tags = {
   Environment = "dev"
   ManagedBy   = "terraform"
 }
+
+# Admin UI Password
+admin_password = "ihoZfDDpMhARpPjW"
