@@ -21,8 +21,8 @@ class ContentSource:
 
 
 class ContentSourceManager:
-    def __init__(self, storage_path: str = "./data/sources.json"):
-        self.storage_path = storage_path
+    def __init__(self, storage_path: str = None):
+        self.storage_path = storage_path or os.path.join(os.environ.get("DATA_DIR", "./data"), "sources.json")
         self.sources: Dict[str, ContentSource] = {}
         self._load()
 

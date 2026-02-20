@@ -13,7 +13,7 @@ from .llm_manager import LLMManager, RAGPromptBuilder
 class NEETRAG:
     def __init__(
         self,
-        persist_directory: str = "./data/faiss_index",
+        persist_directory: str = None,
         embedding_provider: str = "huggingface",
         embedding_model: str = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
         embedding_dimension: int = 384,
@@ -33,7 +33,7 @@ class NEETRAG:
         )
 
         self.vector_manager = VectorStoreManager(
-            persist_directory=persist_directory,
+            persist_directory=persist_directory or os.path.join(os.environ.get("DATA_DIR", "./data"), "faiss_index"),
             embedding_provider=embedding_provider,
             embedding_model=embedding_model,
             embedding_dimension=embedding_dimension,
