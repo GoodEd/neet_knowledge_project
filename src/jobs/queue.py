@@ -12,12 +12,20 @@ class IngestionQueue:
             raise ValueError("SQS_QUEUE_URL is required")
         self.sqs = boto3.client("sqs", region_name=self.region_name)
 
-    def submit_job(self, source_id: str, url: str, source_type: str):
+    def submit_job(
+        self,
+        source_id: str,
+        url: str,
+        source_type: str,
+        s3_audio_uri: str | None = None,
+    ):
         body = {
             "source_id": source_id,
             "url": url,
             "source_type": source_type,
         }
+        if s3_audio_uri:
+            body["s3_audio_uri"] = s3_audio_uri
         return self.sqs.send_message(
             QueueUrl=self.queue_url, MessageBody=json.dumps(body)
         )

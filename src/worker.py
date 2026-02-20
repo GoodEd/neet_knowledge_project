@@ -20,7 +20,8 @@ def _extract_job(body: str):
     source = data.get("source") or data.get("url")
     source_type = data.get("source_type") or data.get("type") or "auto"
     source_id = data.get("source_id")
-    return source_id, source, source_type
+    s3_audio_uri = data.get("s3_audio_uri")
+    return source_id, source, source_type, s3_audio_uri
 
 
 def main():
@@ -55,7 +56,7 @@ def main():
             body = msg.get("Body", "{}")
 
             try:
-                source_id, source, source_type = _extract_job(body)
+                source_id, source, source_type, s3_audio_uri = _extract_job(body)
             except Exception:
                 logger.exception("Invalid message body. Deleting message: %s", body)
                 sqs.delete_message(QueueUrl=queue.queue_url, ReceiptHandle=receipt)
@@ -67,18 +68,32 @@ def main():
                 continue
 
             logger.info(
-                "Processing ingestion job: source_id=%s source=%s type=%s",
+                "Processing ingestion job: source_id=%s source=%s type=%s s3_audio_uri=%s",
                 source_id,
                 source,
                 source_type,
+                s3_audio_uri,
             )
             if source_id and source_manager.get_source(source_id):
+                if s3_audio_uri:
+                    src = source_manager.get_source(source_id)
+                    if src:
+                        new_metadata = src.metadata or {}
+                        new_metadata["s3_audio_uri"] = s3_audio_uri
+                        source_manager.set_source_metadata(source_id, new_metadata)
                 update_result = updater.update_source(source_id)
                 failed = update_result.get("status") != "success"
                 result = update_result
             else:
-                result = rag.ingest_content(source, source_type=source_type)
-                failed = result.get("total_failed", 0)
+                if source_type == "youtube" and s3_audio_uri:
+                    processed = rag.content_processor.process_youtube(
+                        source, s3_audio_uri=s3_audio_uri
+                    )
+                    result = rag.ingest_processed_content(processed)
+                    failed = result.get("status") != "success"
+                else:
+                    result = rag.ingest_content(source, source_type=source_type)
+                    failed = result.get("total_failed", 0)
 
             if failed:
                 logger.error("Ingestion failed for %s: %s", source, result)

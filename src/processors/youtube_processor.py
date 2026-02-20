@@ -1,10 +1,9 @@
 import os
 import re
-import glob
 import logging
 from typing import List, Dict, Optional, Any
 import yt_dlp
-import webvtt
+from youtube_transcript_api import YouTubeTranscriptApi
 from langchain_core.documents import Document
 
 # Set up logging
@@ -14,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 class YouTubeProcessor:
     """
-    Processor for YouTube videos using yt-dlp to fetch subtitles.
+    Processor for YouTube videos using transcript APIs.
     Can optionally use Google API Key for metadata if available.
     """
 
@@ -31,7 +30,7 @@ class YouTubeProcessor:
             except Exception as e:
                 logger.warning(f"Failed to initialize YouTube Data API: {e}")
 
-    def process(self, url: str) -> Dict[str, Any]:
+    def process(self, url: str, s3_audio_uri: Optional[str] = None) -> Dict[str, Any]:
         """
         Process a YouTube video URL and return a result dictionary.
 
@@ -57,8 +56,7 @@ class YouTubeProcessor:
                 video_title = metadata.get("title", video_title)
 
         try:
-            # 2. Get video subtitles using yt-dlp
-            transcript_data = self._get_transcript_with_ytdlp(url)
+            transcript_data = self._get_transcript_with_api(video_id, video_title)
 
             # If API fetched title, ensure transcript data uses it
             if self.youtube_client and video_title != "Unknown Video":
@@ -83,210 +81,226 @@ class YouTubeProcessor:
             error_msg = str(e)
             logger.error(f"Error processing YouTube video {url}: {error_msg}")
 
-            # 4. Fallback: Audio Download + Multimodal Chat (OpenRouter/Gemini)
-            logger.info("Attempting AUDIO DOWNLOAD + MULTIMODAL CHAT fallback...")
+        logger.info("Falling back to audio transcription.")
+        transcript_data = []
+
+        if s3_audio_uri:
             try:
-                transcript_data = self._transcribe_with_multimodal_chat(
-                    url, video_title
+                transcript_data = self._transcribe_from_s3_audio(
+                    s3_audio_uri=s3_audio_uri,
+                    video_title=video_title,
                 )
-                if transcript_data:
-                    documents = self._create_documents(transcript_data, url, video_id)
-                    return {
-                        "documents": documents,
-                        "source": url,
-                        "video_id": video_id,
-                        "total_chunks": len(documents),
-                        "processed_at": datetime.now().isoformat(),
-                    }
-            except Exception as audio_e:
-                logger.error(f"Audio fallback failed: {audio_e}")
+            except Exception as e:
+                logger.error(f"S3 audio fallback failed: {e}")
 
-            raise RuntimeError(f"Failed to fetch transcript: {error_msg}")
+        if not transcript_data:
+            try:
+                transcript_data = self._transcribe_from_ytdlp_audio(
+                    url=url,
+                    video_title=video_title,
+                )
+            except Exception as e:
+                logger.error(f"yt-dlp audio fallback failed: {e}")
 
-    def _transcribe_with_multimodal_chat(
+        if transcript_data:
+            documents = self._create_documents(transcript_data, url, video_id)
+            from datetime import datetime
+
+            return {
+                "documents": documents,
+                "source": url,
+                "video_id": video_id,
+                "total_chunks": len(documents),
+                "processed_at": datetime.now().isoformat(),
+            }
+
+        raise RuntimeError(f"Failed to fetch transcript: {error_msg}")
+
+    def _get_transcript_with_api(
+        self, video_id: str, video_title: str
+    ) -> List[Dict[str, Any]]:
+        preferred_languages = ["en", "en-IN", "hi", "hi-IN"]
+
+        try:
+            transcript_list = YouTubeTranscriptApi().list(video_id)
+        except Exception as e:
+            logger.error(f"YouTube transcript list failed: {e}")
+            raise RuntimeError(f"Failed to fetch transcript for video: {video_id}")
+
+        selected = None
+        for lang in preferred_languages:
+            try:
+                selected = transcript_list.find_transcript([lang])
+                break
+            except Exception:
+                pass
+            try:
+                selected = transcript_list.find_generated_transcript([lang])
+                break
+            except Exception:
+                pass
+
+        if selected is None:
+            try:
+                selected = next(iter(transcript_list))
+            except Exception:
+                selected = None
+
+        if selected is None:
+            raise RuntimeError(f"No transcript available for video: {video_id}")
+
+        try:
+            raw_segments = selected.fetch()
+        except Exception as e:
+            logger.error(f"Transcript fetch failed: {e}")
+            raise RuntimeError(f"Failed to fetch transcript for video: {video_id}")
+
+        transcript_entries = []
+        for segment in raw_segments:
+            text = (getattr(segment, "text", "") or "").strip()
+            if not text:
+                continue
+            start = float(getattr(segment, "start", 0.0) or 0.0)
+            duration = float(getattr(segment, "duration", 0.0) or 0.0)
+            transcript_entries.append(
+                {
+                    "text": text,
+                    "start": start,
+                    "duration": duration,
+                    "video_title": video_title,
+                }
+            )
+
+        if not transcript_entries:
+            raise RuntimeError(f"Empty transcript for video: {video_id}")
+
+        return transcript_entries
+
+    def _transcribe_from_s3_audio(
+        self, s3_audio_uri: str, video_title: str
+    ) -> List[Dict[str, Any]]:
+        import tempfile
+        import boto3
+
+        match = re.match(r"^s3://([^/]+)/(.+)$", s3_audio_uri)
+        if not match:
+            raise ValueError(f"Invalid S3 URI: {s3_audio_uri}")
+
+        bucket = match.group(1)
+        key = match.group(2)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            local_path = os.path.join(tmpdir, os.path.basename(key) or "audio.mp3")
+            s3 = boto3.client("s3", region_name=os.getenv("AWS_REGION"))
+            s3.download_file(bucket, key, local_path)
+            return self._transcribe_audio_file_with_multimodal(local_path, video_title)
+
+    def _transcribe_from_ytdlp_audio(
         self, url: str, video_title: str
     ) -> List[Dict[str, Any]]:
-        """Download audio and transcribe using Multimodal LLM (Gemini via OpenRouter)."""
         import tempfile
-        import shutil
-        import subprocess
-        import glob
-        import base64
-        import json
-        from openai import OpenAI
 
-        # Check for API key
-        api_key = os.getenv("OPENAI_API_KEY")
-        base_url = os.getenv("OPENAI_BASE_URL", "https://openrouter.ai/api/v1")
-        # Use a model known to support audio, default to Gemini 2.0 Flash
-        model = os.getenv("OPENAI_MODEL_NAME", "google/gemini-2.0-flash-001")
-
-        if not api_key:
-            logger.warning("No OPENAI_API_KEY found for Multimodal fallback.")
-            return []
-
-        client = OpenAI(api_key=api_key, base_url=base_url)
-
-        with tempfile.TemporaryDirectory() as tmpdirname:
-            # 1. Download Audio
-            audio_path = os.path.join(tmpdirname, "audio")  # yt-dlp appends extension
-
+        with tempfile.TemporaryDirectory() as tmpdir:
+            audio_path = os.path.join(tmpdir, "audio")
             ydl_opts = {
                 "format": "bestaudio/best",
                 "postprocessors": [
                     {
                         "key": "FFmpegExtractAudio",
                         "preferredcodec": "mp3",
-                        "preferredquality": "128",  # Lower bitrate for smaller payload
+                        "preferredquality": "128",
                     }
                 ],
                 "outtmpl": audio_path,
                 "quiet": True,
             }
 
-            try:
-                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                    ydl.download([url])
-            except Exception as e:
-                logger.error(f"Audio download failed: {e}")
-                return []
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                ydl.download([url])
 
             final_audio_path = audio_path + ".mp3"
             if not os.path.exists(final_audio_path):
-                logger.error("Audio file not found after download.")
-                return []
+                raise RuntimeError("Audio file not found after yt-dlp download")
 
-            file_size_mb = os.path.getsize(final_audio_path) / (1024 * 1024)
-            logger.info(f"Downloaded audio size: {file_size_mb:.2f} MB")
+            return self._transcribe_audio_file_with_multimodal(
+                final_audio_path, video_title
+            )
 
-            files_to_transcribe = []
+    def _transcribe_audio_file_with_multimodal(
+        self, audio_path: str, video_title: str
+    ) -> List[Dict[str, Any]]:
+        import base64
+        import json
+        from openai import OpenAI
 
-            # Context window limits for audio are generous on Gemini 2.0, but let's be safe.
-            # 10 mins (600s) is safe.
-            if (
-                file_size_mb > 10
-            ):  # Chunk aggressively to keep payload manageable for HTTP
-                logger.info("File large. Chunking audio...")
-                chunk_dir = os.path.join(tmpdirname, "chunks")
-                os.makedirs(chunk_dir, exist_ok=True)
+        api_key = os.getenv("OPENAI_API_KEY")
+        base_url = os.getenv("OPENAI_BASE_URL", "https://openrouter.ai/api/v1")
+        model = os.getenv("OPENAI_MODEL_NAME", "google/gemini-2.0-flash-001")
 
-                chunk_pattern = os.path.join(chunk_dir, "chunk%03d.mp3")
-                cmd = [
-                    "ffmpeg",
-                    "-i",
-                    final_audio_path,
-                    "-f",
-                    "segment",
-                    "-segment_time",
-                    "600",
-                    "-c",
-                    "copy",
-                    chunk_pattern,
-                ]
+        if not api_key:
+            raise RuntimeError("OPENAI_API_KEY is required for audio transcription")
 
-                subprocess.run(
-                    cmd,
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                    check=True,
-                )
+        client = OpenAI(api_key=api_key, base_url=base_url)
 
-                chunk_files = sorted(glob.glob(os.path.join(chunk_dir, "*.mp3")))
-                logger.info(f"Split into {len(chunk_files)} chunks.")
+        with open(audio_path, "rb") as audio_file:
+            encoded_string = base64.b64encode(audio_file.read()).decode("utf-8")
 
-                for i, chunk_path in enumerate(chunk_files):
-                    files_to_transcribe.append(
-                        {"path": chunk_path, "time_offset": i * 600.0}
-                    )
-            else:
-                files_to_transcribe.append(
-                    {"path": final_audio_path, "time_offset": 0.0}
-                )
+        prompt = (
+            "Transcribe this audio verbatim and return valid JSON list with keys "
+            '"text", "start", "duration".'
+        )
 
-            # 2. Transcribe Each Chunk
-            transcript_entries = []
+        response = client.chat.completions.create(
+            model=model,
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": prompt},
+                        {
+                            "type": "input_audio",
+                            "input_audio": {"data": encoded_string, "format": "mp3"},
+                        },
+                    ],
+                }
+            ],
+        )
 
-            for item in files_to_transcribe:
-                current_file = item["path"]
-                offset = item["time_offset"]
+        content = response.choices[0].message.content
+        if not content:
+            raise RuntimeError("Empty multimodal transcription response")
+        if content.startswith("```json"):
+            content = content.replace("```json", "").replace("```", "")
+        elif content.startswith("```"):
+            content = content.replace("```", "")
 
-                logger.info(
-                    f"Transcribing: {os.path.basename(current_file)} (Offset: {offset}s)"
-                )
-
-                try:
-                    with open(current_file, "rb") as audio_file:
-                        encoded_string = base64.b64encode(audio_file.read()).decode(
-                            "utf-8"
-                        )
-
-                    prompt = """
-                    Transcribe this audio file verbatim. 
-                    Return the output as a JSON list of objects, where each object has:
-                    - "text": The spoken text
-                    - "start": Start time in seconds (relative to audio start)
-                    - "duration": Duration in seconds
-                    
-                    Example: [{"text": "Hello world", "start": 0.5, "duration": 1.2}]
-                    Ensure the JSON is valid. Do not include markdown code blocks.
-                    """
-
-                    response = client.chat.completions.create(
-                        model=model,
-                        messages=[
-                            {
-                                "role": "user",
-                                "content": [
-                                    {"type": "text", "text": prompt},
-                                    {
-                                        "type": "input_audio",
-                                        "input_audio": {
-                                            "data": encoded_string,
-                                            "format": "mp3",
-                                        },
-                                    },
-                                ],
-                            }
-                        ],
-                    )
-
-                    content = response.choices[0].message.content
-                    # Clean potential markdown
-                    if content.startswith("```json"):
-                        content = content.replace("```json", "").replace("```", "")
-                    elif content.startswith("```"):
-                        content = content.replace("```", "")
-
-                    segments = json.loads(content)
-
-                    if isinstance(segments, list):
-                        for segment in segments:
-                            start = segment.get("start", 0)
-                            end = start + segment.get(
-                                "duration", 0
-                            )  # Calculate end locally if needed
-                            text = segment.get("text", "")
-
-                            transcript_entries.append(
-                                {
-                                    "text": text.strip(),
-                                    "start": start + offset,
-                                    "duration": segment.get("duration", 0),
-                                    "video_title": video_title,
-                                }
-                            )
-
-                except Exception as e:
-                    logger.error(
-                        f"Multimodal transcription failed for {current_file}: {e}"
-                    )
-                    # Fallback for chunk failure - continue
+        segments = json.loads(content)
+        transcript_entries = []
+        if isinstance(segments, list):
+            for segment in segments:
+                text = (segment.get("text") or "").strip()
+                if not text:
                     continue
+                start = float(segment.get("start", 0.0) or 0.0)
+                duration = float(segment.get("duration", 0.0) or 0.0)
+                transcript_entries.append(
+                    {
+                        "text": text,
+                        "start": start,
+                        "duration": duration,
+                        "video_title": video_title,
+                    }
+                )
 
-            return transcript_entries
+        if not transcript_entries:
+            raise RuntimeError("No transcript segments produced from audio")
+
+        return transcript_entries
 
     def _get_metadata_from_api(self, video_id: str) -> Optional[Dict[str, Any]]:
         """Fetch video metadata using official YouTube Data API."""
+        if not self.youtube_client:
+            return None
         try:
             request = self.youtube_client.videos().list(
                 part="snippet,contentDetails", id=video_id
@@ -319,100 +333,6 @@ class YouTubeProcessor:
             if match:
                 return match.group(1)
         return None
-
-    def _get_transcript_with_ytdlp(self, url: str) -> List[Dict[str, Any]]:
-        """
-        Download and parse subtitles using yt-dlp.
-        Returns a list of dicts with 'text', 'start', 'duration'.
-        """
-        import time
-        import random
-
-        # Add a random delay to be polite and avoid rate limits
-        delay = random.uniform(2, 5)
-        logger.info(f"Sleeping for {delay:.2f}s before fetching transcript...")
-        time.sleep(delay)
-
-        ydl_opts = {
-            "skip_download": True,
-            "writeautomaticsub": True,  # Download auto-generated subs
-            "writesubtitles": True,  # Download manual subs
-            "subtitleslangs": [
-                "en",
-                "hi",
-                "en-IN",
-                "hi-IN",
-            ],  # English + Hindi fallback
-            "outtmpl": "%(id)s",
-            "quiet": True,
-            "no_warnings": True,
-            # 'extractor_args': {'youtube': {'player_client': ['android', 'web']}}, # Try standard client first
-            "sleep_interval": 2,
-            "max_sleep_interval": 5,
-        }
-
-        # We will use a temporary directory or just the current directory and clean up
-        # Ideally, use a temp dir.
-        import tempfile
-        import shutil
-
-        transcript_entries = []
-
-        with tempfile.TemporaryDirectory() as tmpdirname:
-            ydl_opts["outtmpl"] = os.path.join(tmpdirname, "%(id)s")
-
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                try:
-                    info = ydl.extract_info(url, download=True)
-                    video_title = info.get("title", "Unknown Title")
-                    # Check for downloaded files
-                    # yt-dlp names them like video_id.en.vtt
-
-                    vtt_files = glob.glob(os.path.join(tmpdirname, "*.vtt"))
-                    if not vtt_files:
-                        logger.warning("No VTT files downloaded.")
-                        return []
-
-                    # Pick the best one (usually the first one found if we filtered by 'en')
-                    vtt_path = vtt_files[0]
-
-                    # Parse VTT
-                    for caption in webvtt.read(vtt_path):
-                        # Calculate start and duration
-                        # caption.start is in "HH:MM:SS.mmm" format
-                        start_seconds = self._vtt_time_to_seconds(caption.start)
-                        end_seconds = self._vtt_time_to_seconds(caption.end)
-                        duration = end_seconds - start_seconds
-
-                        text = caption.text.strip().replace("\n", " ")
-                        if text:
-                            transcript_entries.append(
-                                {
-                                    "text": text,
-                                    "start": start_seconds,
-                                    "duration": duration,
-                                    "video_title": video_title,
-                                }
-                            )
-
-                except Exception as e:
-                    logger.error(f"yt-dlp failed: {e}")
-
-            # If we got transcript entries from VTT parsing, return them
-            if transcript_entries:
-                return transcript_entries
-
-            # Fallback to mock if available (for testing)
-            vid = self._extract_video_id(url)
-            mock_data = self._get_mock_transcript(vid) if vid else []
-            if mock_data:
-                logger.warning(
-                    f"Using MOCK transcript for {url} due to download failure."
-                )
-                return mock_data
-
-            # No transcript obtained by any method
-            raise RuntimeError(f"Failed to fetch transcript for {url}")
 
     def _get_mock_transcript(self, video_id: str) -> List[Dict[str, Any]]:
         """Return mock transcript for testing when YT is blocked."""
@@ -481,20 +401,6 @@ class YouTubeProcessor:
                 },
             ]
         return []
-
-    def _vtt_time_to_seconds(self, time_str: str) -> float:
-        """Convert VTT timestamp to seconds."""
-        # VTT format: HH:MM:SS.mmm or MM:SS.mmm
-        parts = time_str.split(":")
-        seconds = 0.0
-        if len(parts) == 3:
-            seconds += float(parts[0]) * 3600
-            seconds += float(parts[1]) * 60
-            seconds += float(parts[2])
-        elif len(parts) == 2:
-            seconds += float(parts[0]) * 60
-            seconds += float(parts[1])
-        return seconds
 
     def _create_documents(
         self, transcript_data: List[Dict[str, Any]], url: str, video_id: str

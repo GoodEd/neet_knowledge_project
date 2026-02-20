@@ -67,22 +67,35 @@ with col1:
     with st.form("add_source_form"):
         source_url = st.text_input("YouTube URL or PDF Path")
         source_title = st.text_input("Title (Optional)")
+        s3_audio_uri = st.text_input("S3 Audio URI (Optional, for YouTube fallback)")
 
         c1, c2 = st.columns(2)
         submit_yt = c1.form_submit_button("Add YouTube")
         submit_pdf = c2.form_submit_button("Add PDF")
 
         if submit_yt and source_url:
-            source_id = source_manager.add_youtube(source_url, source_title or None)
-            if queue_enabled:
-                ingestion_queue.submit_job(source_id, source_url, "youtube")
+            metadata = None
+            if s3_audio_uri:
+                metadata = {"s3_audio_uri": s3_audio_uri}
+            source_id = source_manager.add_youtube(
+                source_url,
+                source_title or None,
+                metadata=metadata,
+            )
+            if queue_enabled and ingestion_queue:
+                ingestion_queue.submit_job(
+                    source_id,
+                    source_url,
+                    "youtube",
+                    s3_audio_uri=s3_audio_uri or None,
+                )
                 st.success("YouTube source added to ingestion queue.")
             else:
                 st.warning("Queue is not configured; source saved as pending.")
 
         if submit_pdf and source_url:
             source_id = source_manager.add_pdf(source_url, source_title or None)
-            if queue_enabled:
+            if queue_enabled and ingestion_queue:
                 ingestion_queue.submit_job(source_id, source_url, "pdf")
                 st.success("PDF source added to ingestion queue.")
             else:
@@ -92,10 +105,18 @@ with col1:
 
     st.header("Process Queue")
     if st.button("🔄 Update/Ingest All Pending Sources", type="primary"):
-        if queue_enabled:
+        if queue_enabled and ingestion_queue:
             pending_sources = source_manager.get_sources_needing_update()
             for src in pending_sources:
-                ingestion_queue.submit_job(src.source_id, src.url, src.source_type)
+                s3_uri = None
+                if src.metadata and isinstance(src.metadata, dict):
+                    s3_uri = src.metadata.get("s3_audio_uri")
+                ingestion_queue.submit_job(
+                    src.source_id,
+                    src.url,
+                    src.source_type,
+                    s3_audio_uri=s3_uri,
+                )
             st.success(
                 f"Queued {len(pending_sources)} source(s) for background ingestion."
             )

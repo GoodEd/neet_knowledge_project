@@ -22,7 +22,9 @@ class ContentSource:
 
 class ContentSourceManager:
     def __init__(self, storage_path: str = None):
-        self.storage_path = storage_path or os.path.join(os.environ.get("DATA_DIR", "./data"), "sources.json")
+        self.storage_path = storage_path or os.path.join(
+            os.environ.get("DATA_DIR", "./data"), "sources.json"
+        )
         self.sources: Dict[str, ContentSource] = {}
         self._load()
 
@@ -45,6 +47,7 @@ class ContentSourceManager:
         source_type: str,
         title: Optional[str] = None,
         fetch_interval_hours: int = 24,
+        metadata: Optional[Dict] = None,
     ) -> str:
         import hashlib
 
@@ -57,22 +60,34 @@ class ContentSourceManager:
             title=title or url,
             fetch_interval_hours=fetch_interval_hours,
             status="pending",
+            metadata=metadata,
         )
         self._save()
         return source_id
 
     def add_youtube(
-        self, url: str, title: Optional[str] = None, fetch_interval_hours: int = 24
+        self,
+        url: str,
+        title: Optional[str] = None,
+        fetch_interval_hours: int = 24,
+        metadata: Optional[Dict] = None,
     ) -> str:
-        return self.add_source(url, "youtube", title, fetch_interval_hours)
+        return self.add_source(url, "youtube", title, fetch_interval_hours, metadata)
 
     def add_html(
         self, url: str, title: Optional[str] = None, fetch_interval_hours: int = 24
     ) -> str:
         return self.add_source(url, "html", title, fetch_interval_hours)
 
-    def add_pdf(self, file_path: str, title: Optional[str] = None) -> str:
-        return self.add_source(file_path, "pdf", title, fetch_interval_hours=0)
+    def add_pdf(
+        self,
+        file_path: str,
+        title: Optional[str] = None,
+        metadata: Optional[Dict] = None,
+    ) -> str:
+        return self.add_source(
+            file_path, "pdf", title, fetch_interval_hours=0, metadata=metadata
+        )
 
     def remove_source(self, source_id: str) -> bool:
         if source_id in self.sources:
@@ -136,6 +151,11 @@ class ContentSourceManager:
             self.sources[source_id].status = "active" if enabled else "disabled"
             self._save()
 
+    def set_source_metadata(self, source_id: str, metadata: Dict[str, Any]):
+        if source_id in self.sources:
+            self.sources[source_id].metadata = metadata
+            self._save()
+
     def get_stats(self) -> Dict[str, Any]:
         stats = {
             "total": len(self.sources),
@@ -167,7 +187,12 @@ class AutoUpdater:
 
         try:
             if source.source_type == "youtube":
-                result = self.rag.content_processor.process_youtube(source.url)
+                s3_audio_uri = None
+                if source.metadata and isinstance(source.metadata, dict):
+                    s3_audio_uri = source.metadata.get("s3_audio_uri")
+                result = self.rag.content_processor.process_youtube(
+                    source.url, s3_audio_uri=s3_audio_uri
+                )
             elif source.source_type == "html":
                 result = self.rag.content_processor.process_html_content(
                     self._fetch_html(source.url), source.url

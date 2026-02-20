@@ -74,8 +74,10 @@ class ContentProcessor:
 
         return result
 
-    def process_youtube(self, video_url: str) -> Dict[str, Any]:
-        result = self.youtube_processor.process(video_url)
+    def process_youtube(
+        self, video_url: str, s3_audio_uri: Optional[str] = None
+    ) -> Dict[str, Any]:
+        result = self.youtube_processor.process(video_url, s3_audio_uri=s3_audio_uri)
 
         # YoutubeProcessor already returns chunked documents effectively,
         # but if we want to apply standard chunker:

@@ -20,8 +20,7 @@ pillow>=10.0.0   # Image processing
 
 # YouTube & Video
 youtube-transcript-api>=0.6.0  # YouTube transcripts
-yt-dlp>=2024.0.0   # Video downloading
-webvtt-py>=0.5.0    # VTT subtitle parsing
+yt-dlp>=2024.0.0
 
 # Web Content
 beautifulsoup4>=4.12.0  # HTML parsing
