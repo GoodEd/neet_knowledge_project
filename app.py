@@ -4,12 +4,12 @@ import sys
 
 # Ensure we can import from src
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from src.utils.ui_helpers import hide_admin_and_toolbar
 
-st.set_page_config(
-    page_title="NEET Knowledge Base",
-    page_icon="📚",
-    layout="wide"
-)
+st.set_page_config(page_title="NEET Knowledge Base", page_icon="📚", layout="wide")
+
+# Apply UI restrictions for non-admin pages
+hide_admin_and_toolbar()
 
 st.title("Welcome to NEET Knowledge Assistant 📚")
 
@@ -23,5 +23,3 @@ This tool helps you search through vast amounts of curated NEET material, includ
 **Get Started:**
 👈 Select **💬 Chat** from the sidebar to start asking questions!
 """)
-
-st.info("Are you a content manager? Navigate to the **⚙️ Admin** panel to ingest new study materials.")
