@@ -84,7 +84,15 @@ class YouTubeProcessor:
         logger.info("Falling back to audio transcription.")
         transcript_data = []
 
-        if s3_audio_uri:
+        try:
+            transcript_data = self._transcribe_from_ytdlp_audio(
+                url=url,
+                video_title=video_title,
+            )
+        except Exception as e:
+            logger.error(f"yt-dlp audio fallback failed: {e}")
+
+        if not transcript_data and s3_audio_uri:
             try:
                 transcript_data = self._transcribe_from_s3_audio(
                     s3_audio_uri=s3_audio_uri,
@@ -92,15 +100,6 @@ class YouTubeProcessor:
                 )
             except Exception as e:
                 logger.error(f"S3 audio fallback failed: {e}")
-
-        if not transcript_data:
-            try:
-                transcript_data = self._transcribe_from_ytdlp_audio(
-                    url=url,
-                    video_title=video_title,
-                )
-            except Exception as e:
-                logger.error(f"yt-dlp audio fallback failed: {e}")
 
         if transcript_data:
             documents = self._create_documents(transcript_data, url, video_id)
