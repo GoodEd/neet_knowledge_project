@@ -168,5 +168,5 @@ variable "tags" {
 variable "admin_password" {
   description = "Password to access the Admin Streamlit page"
   type        = string
-  default     = "admin123"
+  default     = "ihoZfDDpMhARpPjW"
 }
