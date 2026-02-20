@@ -31,4 +31,4 @@ ENV STREAMLIT_SERVER_HEADLESS=true
 EXPOSE 8501
 
 # Run Streamlit
-CMD ["streamlit", "run", "src/main.py", "--", "chat"]
+CMD ["streamlit", "run", "app.py", "--server.address", "0.0.0.0"]
