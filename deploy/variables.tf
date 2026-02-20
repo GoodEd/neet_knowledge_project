@@ -164,3 +164,9 @@ variable "tags" {
   type    = map(string)
   default = {}
 }
+
+variable "admin_password" {
+  description = "Password to access the Admin Streamlit page"
+  type        = string
+  default     = "admin123"
+}

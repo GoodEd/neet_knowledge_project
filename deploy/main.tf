@@ -366,7 +366,8 @@ resource "aws_ecs_task_definition" "streamlit" {
         { name = "OPENAI_MODEL_NAME", value = var.openai_model_name },
         { name = "DATA_DIR", value = "/shared/data" },
         { name = "REDIS_URL", value = local.redis_url },
-        { name = "SQS_QUEUE_URL", value = aws_sqs_queue.ingestion.url }
+        { name = "SQS_QUEUE_URL", value = aws_sqs_queue.ingestion.url },
+        { name = "ADMIN_PASSWORD", value = var.admin_password }
       ]
 
       secrets = local.container_secrets
@@ -434,7 +435,8 @@ resource "aws_ecs_task_definition" "worker" {
         { name = "OPENAI_MODEL_NAME", value = var.openai_model_name },
         { name = "DATA_DIR", value = "/shared/data" },
         { name = "REDIS_URL", value = local.redis_url },
-        { name = "SQS_QUEUE_URL", value = aws_sqs_queue.ingestion.url }
+        { name = "SQS_QUEUE_URL", value = aws_sqs_queue.ingestion.url },
+        { name = "ADMIN_PASSWORD", value = var.admin_password }
       ]
 
       secrets = local.container_secrets
