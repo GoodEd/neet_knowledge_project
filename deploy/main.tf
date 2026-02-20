@@ -471,7 +471,7 @@ resource "aws_ecs_service" "streamlit" {
   network_configuration {
     subnets          = var.private_subnet_ids
     security_groups  = [aws_security_group.ecs_tasks.id]
-    assign_public_ip = false
+    assign_public_ip = true
   }
 
   load_balancer {
@@ -500,7 +500,7 @@ resource "aws_ecs_service" "worker" {
   network_configuration {
     subnets          = var.private_subnet_ids
     security_groups  = [aws_security_group.ecs_tasks.id]
-    assign_public_ip = false
+    assign_public_ip = true
   }
 
   deployment_circuit_breaker {
@@ -868,3 +868,17 @@ resource "aws_iam_role_policy" "codepipeline" {
 }
 
 data "aws_caller_identity" "current" {}
+
+resource "aws_route53_record" "app" {
+  count   = var.create_dns_record ? 1 : 0
+  zone_id = data.aws_route53_zone.main[0].zone_id
+  name    = var.app_fqdn
+  type    = "A"
+
+  alias {
+    name                   = data.aws_lb.shared.dns_name
+    zone_id                = data.aws_lb.shared.zone_id
+    evaluate_target_health = true
+  }
+}
+

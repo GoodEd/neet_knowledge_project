@@ -24,8 +24,8 @@ private_subnet_ids = [
 ]
 
 # Images
-ecr_streamlit_image = "559387212220.dkr.ecr.ap-south-1.amazonaws.com/neet-knowledge-streamlit:latest"
-ecr_worker_image    = "559387212220.dkr.ecr.ap-south-1.amazonaws.com/neet-knowledge-worker:latest"
+ecr_streamlit_image = "559387212220.dkr.ecr.ap-south-1.amazonaws.com/neet-knowledge-dev-streamlit:latest"
+ecr_worker_image    = "559387212220.dkr.ecr.ap-south-1.amazonaws.com/neet-knowledge-dev-worker:latest"
 
 # Autoscaling
 streamlit_desired_count = 2
