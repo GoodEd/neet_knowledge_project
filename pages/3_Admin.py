@@ -6,6 +6,7 @@ from dotenv import load_dotenv
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.rag.neet_rag import NEETRAG
+from src.jobs.queue import IngestionQueue
 from src.utils.content_manager import ContentSourceManager, AutoUpdater
 
 load_dotenv()
@@ -47,6 +48,13 @@ rag = get_rag_system()
 source_manager = ContentSourceManager()
 updater = AutoUpdater(source_manager, rag)
 
+try:
+    ingestion_queue = IngestionQueue()
+    queue_enabled = True
+except Exception:
+    ingestion_queue = None
+    queue_enabled = False
+
 st.title("⚙️ Content Management Admin")
 st.markdown(
     "Use this panel to ingest and manage documents and videos in the RAG vector store."
@@ -65,25 +73,43 @@ with col1:
         submit_pdf = c2.form_submit_button("Add PDF")
 
         if submit_yt and source_url:
-            source_manager.add_youtube(source_url, source_title or None)
-            st.success("YouTube source added to queue!")
+            source_id = source_manager.add_youtube(source_url, source_title or None)
+            if queue_enabled:
+                ingestion_queue.submit_job(source_id, source_url, "youtube")
+                st.success("YouTube source added to ingestion queue.")
+            else:
+                st.warning("Queue is not configured; source saved as pending.")
 
         if submit_pdf and source_url:
-            source_manager.add_pdf(source_url, source_title or None)
-            st.success("PDF source added to queue!")
+            source_id = source_manager.add_pdf(source_url, source_title or None)
+            if queue_enabled:
+                ingestion_queue.submit_job(source_id, source_url, "pdf")
+                st.success("PDF source added to ingestion queue.")
+            else:
+                st.warning("Queue is not configured; source saved as pending.")
 
     st.divider()
 
     st.header("Process Queue")
     if st.button("🔄 Update/Ingest All Pending Sources", type="primary"):
-        with st.status("Processing sources...", expanded=True) as status:
-            results = updater.update_all()
-            for res in results:
-                if res.get("status") == "success":
-                    st.write(f"✅ {res.get('source_id')}: Updated")
-                else:
-                    st.write(f"❌ {res.get('source_id')}: Failed - {res.get('error')}")
-            status.update(label="Update Complete!", state="complete")
+        if queue_enabled:
+            pending_sources = source_manager.get_sources_needing_update()
+            for src in pending_sources:
+                ingestion_queue.submit_job(src.source_id, src.url, src.source_type)
+            st.success(
+                f"Queued {len(pending_sources)} source(s) for background ingestion."
+            )
+        else:
+            with st.status("Processing sources...", expanded=True) as status:
+                results = updater.update_all()
+                for res in results:
+                    if res.get("status") == "success":
+                        st.write(f"✅ {res.get('source_id')}: Updated")
+                    else:
+                        st.write(
+                            f"❌ {res.get('source_id')}: Failed - {res.get('error')}"
+                        )
+                status.update(label="Update Complete!", state="complete")
 
 with col2:
     st.header("Existing Sources Database")
