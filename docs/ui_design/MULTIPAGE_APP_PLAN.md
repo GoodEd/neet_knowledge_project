@@ -12,9 +12,9 @@ Streamlit supports multipage apps natively by creating a `pages/` directory.
 neet_knowledge_project/
 ├── Home.py                  # Entry point (Student Chat by default)
 ├── pages/
-│   ├── 1_👨‍🎓_Chat.py       # Student interface
-│   ├── 2_📚_History.py    # Student history (requires DB/Redis)
-│   └── 3_⚙️_Admin.py      # Content Manager interface (Password protected)
+│   ├── 1_Chat.py           # Student interface
+│   ├── 2_History.py        # Student history (requires DB/Redis)
+│   └── 3_Admin.py          # Content Manager interface (Password protected)
 ```
 
 ### 2. User Roles & Access Control
@@ -25,7 +25,7 @@ neet_knowledge_project/
 We can use Streamlit's session state and a simple password field in the Admin page to unlock content management features.
 
 ```python
-# pages/3_⚙️_Admin.py
+# pages/3_Admin.py
 import streamlit as st
 
 def check_password():
@@ -57,10 +57,16 @@ Since we already planned/deployed Redis in the AWS ECS setup, we should use it f
 ### 4. Implementation Steps
 
 1.  **Refactor `app.py`** -> Rename to `Home.py` or move to `pages/1_Chat.py`.
-2.  **Extract Admin UI**: Move the sidebar source management code into a dedicated `pages/Admin.py` with password protection.
+2.  **Extract Admin UI**: Move the sidebar source management code into a dedicated `pages/3_Admin.py` with password protection.
 3.  **Implement Redis History**:
     *   Add a utility class `ChatHistoryManager(redis_client)`.
     *   Load history on app start based on a generated session cookie.
     *   Append to Redis on every message.
+
+### 5. Route Mapping (Current)
+- `app.py` -> `/` (Home)
+- `pages/1_Chat.py` -> `/Chat`
+- `pages/2_History.py` -> `/History`
+- `pages/3_Admin.py` -> `/Admin`
 
 This approach requires minimal external dependencies and works natively within Streamlit and the existing AWS architecture.

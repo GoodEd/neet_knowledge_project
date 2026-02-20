@@ -21,5 +21,5 @@ This tool helps you search through vast amounts of curated NEET material, includ
 - 📄 Curated PDFs and Study Materials
 
 **Get Started:**
-👈 Select **💬 Chat** from the sidebar to start asking questions!
+👈 Select **Chat** from the sidebar to start asking questions.
 """)
