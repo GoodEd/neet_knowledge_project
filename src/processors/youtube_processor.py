@@ -406,8 +406,11 @@ class YouTubeProcessor:
         client = OpenAI(api_key=api_key, base_url=base_url)
 
         prompt = (
-            "Transcribe this audio verbatim and return valid JSON list with keys "
-            '"text", "start", "duration".'
+            "Transcribe this Hinglish/English/Hindi audio verbatim and return ONLY valid JSON array "
+            'with keys "text", "start", "duration". '
+            "Do not translate content. Keep technical NEET terms, formulas, symbols, units, and Latin letters in English script. "
+            "Examples to keep in English: work done, pressure, delta V, radius, ratio, displacement, cross-sectional area, pi r^2, F=ma. "
+            "Do not wrap output in markdown fences."
         )
 
         max_chunk_seconds = int(os.getenv("AUDIO_TRANSCRIBE_CHUNK_SECONDS", "480"))
@@ -469,7 +472,38 @@ class YouTubeProcessor:
         if not transcript_entries:
             raise RuntimeError("No transcript segments produced from audio")
 
+        if os.getenv("NORMALIZE_TECH_TERMS", "true").lower() == "true":
+            for entry in transcript_entries:
+                entry["text"] = self._normalize_technical_text(entry.get("text", ""))
+
         return transcript_entries
+
+    def _normalize_technical_text(self, text: str) -> str:
+        if not text:
+            return text
+
+        replacements = [
+            (r"\bवर्क\s*डन\b", "work done"),
+            (r"\bफॉर्मूला\b", "formula"),
+            (r"\bप्रोसेस\b", "process"),
+            (r"\bप्रेशर\b", "pressure"),
+            (r"\bकांस्टेंट\s*प्रेशर\b", "constant pressure"),
+            (r"\bडेल्टा\s*v\b", "delta v"),
+            (r"\bरेडियस\b", "radius"),
+            (r"\bरेशियो\b", "ratio"),
+            (r"\bडिस्प्लेसमेंट\b", "displacement"),
+            (r"\bक्रॉस\s*सेक्शन\s*एरिया\b", "cross-sectional area"),
+            (r"\bपिस्टन\b", "piston"),
+            (r"\bवॉल्यूम\b", "volume"),
+            (r"\bप्रपोर्शनल\b", "proportional"),
+        ]
+
+        out = text
+        for pattern, repl in replacements:
+            out = re.sub(pattern, repl, out, flags=re.IGNORECASE)
+
+        out = re.sub(r"\bpi\s*r\s*\^?\s*2\b", "pi r^2", out, flags=re.IGNORECASE)
+        return out
 
     def _request_transcript_segments(
         self,
