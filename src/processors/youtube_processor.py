@@ -1,5 +1,6 @@
 import os
 import re
+import json
 import logging
 from typing import List, Dict, Optional, Any
 import yt_dlp
@@ -391,7 +392,6 @@ class YouTubeProcessor:
         self, audio_path: str, video_title: str, track_id: str
     ) -> List[Dict[str, Any]]:
         import base64
-        import json
         import subprocess
         import tempfile
         from openai import OpenAI
@@ -451,34 +451,12 @@ class YouTubeProcessor:
                 with open(chunk_path, "rb") as audio_file:
                     encoded_string = base64.b64encode(audio_file.read()).decode("utf-8")
 
-                response = client.chat.completions.create(
+                segments = self._request_transcript_segments(
+                    client=client,
                     model=model,
-                    messages=[
-                        {
-                            "role": "user",
-                            "content": [
-                                {"type": "text", "text": prompt},
-                                {
-                                    "type": "input_audio",
-                                    "input_audio": {
-                                        "data": encoded_string,
-                                        "format": "mp3",
-                                    },
-                                },
-                            ],
-                        }
-                    ],
+                    prompt=prompt,
+                    encoded_audio=encoded_string,
                 )
-
-                content = response.choices[0].message.content
-                if not content:
-                    continue
-                if content.startswith("```json"):
-                    content = content.replace("```json", "").replace("```", "")
-                elif content.startswith("```"):
-                    content = content.replace("```", "")
-
-                segments = json.loads(content)
                 if isinstance(segments, list):
                     chunk_entries = self._normalize_transcript_entries(
                         segments, video_title, track_id
@@ -492,6 +470,65 @@ class YouTubeProcessor:
             raise RuntimeError("No transcript segments produced from audio")
 
         return transcript_entries
+
+    def _request_transcript_segments(
+        self,
+        client,
+        model: str,
+        prompt: str,
+        encoded_audio: str,
+    ) -> List[Dict[str, Any]]:
+        response = client.chat.completions.create(
+            model=model,
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": prompt},
+                        {
+                            "type": "input_audio",
+                            "input_audio": {"data": encoded_audio, "format": "mp3"},
+                        },
+                    ],
+                }
+            ],
+        )
+
+        content = response.choices[0].message.content
+        if not content:
+            return []
+        return self._parse_segments_json(content)
+
+    def _parse_segments_json(self, content: str) -> List[Dict[str, Any]]:
+        text = content.strip()
+        if text.startswith("```json"):
+            text = text.replace("```json", "").replace("```", "").strip()
+        elif text.startswith("```"):
+            text = text.replace("```", "").strip()
+
+        candidates = [text]
+
+        left = text.find("[")
+        right = text.rfind("]")
+        if left != -1 and right != -1 and right > left:
+            candidates.append(text[left : right + 1])
+
+        cleaned = "".join(ch for ch in text if ord(ch) >= 32 or ch in "\n\r\t")
+        candidates.append(cleaned)
+
+        if left != -1 and right != -1 and right > left:
+            chunk = cleaned[left : right + 1]
+            candidates.append(chunk)
+
+        for candidate in candidates:
+            try:
+                parsed = json.loads(candidate)
+                if isinstance(parsed, list):
+                    return parsed
+            except Exception:
+                continue
+
+        raise RuntimeError("Unable to parse transcript JSON from model output")
 
     def _get_metadata_from_api(self, video_id: str) -> Optional[Dict[str, Any]]:
         """Fetch video metadata using official YouTube Data API."""
