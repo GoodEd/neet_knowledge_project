@@ -392,6 +392,8 @@ class YouTubeProcessor:
     ) -> List[Dict[str, Any]]:
         import base64
         import json
+        import subprocess
+        import tempfile
         from openai import OpenAI
 
         api_key = os.getenv("OPENAI_API_KEY")
@@ -403,44 +405,88 @@ class YouTubeProcessor:
 
         client = OpenAI(api_key=api_key, base_url=base_url)
 
-        with open(audio_path, "rb") as audio_file:
-            encoded_string = base64.b64encode(audio_file.read()).decode("utf-8")
-
         prompt = (
             "Transcribe this audio verbatim and return valid JSON list with keys "
             '"text", "start", "duration".'
         )
 
-        response = client.chat.completions.create(
-            model=model,
-            messages=[
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": prompt},
-                        {
-                            "type": "input_audio",
-                            "input_audio": {"data": encoded_string, "format": "mp3"},
-                        },
+        max_chunk_seconds = int(os.getenv("AUDIO_TRANSCRIBE_CHUNK_SECONDS", "480"))
+        transcript_entries: List[Dict[str, Any]] = []
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            chunk_pattern = os.path.join(tmpdir, "chunk%03d.mp3")
+            try:
+                subprocess.run(
+                    [
+                        "ffmpeg",
+                        "-hide_banner",
+                        "-loglevel",
+                        "error",
+                        "-i",
+                        audio_path,
+                        "-f",
+                        "segment",
+                        "-segment_time",
+                        str(max_chunk_seconds),
+                        "-c",
+                        "copy",
+                        chunk_pattern,
                     ],
-                }
-            ],
-        )
+                    check=True,
+                )
+                chunk_paths = sorted(
+                    [
+                        os.path.join(tmpdir, p)
+                        for p in os.listdir(tmpdir)
+                        if p.startswith("chunk") and p.endswith(".mp3")
+                    ]
+                )
+            except Exception:
+                chunk_paths = []
 
-        content = response.choices[0].message.content
-        if not content:
-            raise RuntimeError("Empty multimodal transcription response")
-        if content.startswith("```json"):
-            content = content.replace("```json", "").replace("```", "")
-        elif content.startswith("```"):
-            content = content.replace("```", "")
+            if not chunk_paths:
+                chunk_paths = [audio_path]
 
-        segments = json.loads(content)
-        transcript_entries = []
-        if isinstance(segments, list):
-            transcript_entries = self._normalize_transcript_entries(
-                segments, video_title, track_id
-            )
+            for idx, chunk_path in enumerate(chunk_paths):
+                with open(chunk_path, "rb") as audio_file:
+                    encoded_string = base64.b64encode(audio_file.read()).decode("utf-8")
+
+                response = client.chat.completions.create(
+                    model=model,
+                    messages=[
+                        {
+                            "role": "user",
+                            "content": [
+                                {"type": "text", "text": prompt},
+                                {
+                                    "type": "input_audio",
+                                    "input_audio": {
+                                        "data": encoded_string,
+                                        "format": "mp3",
+                                    },
+                                },
+                            ],
+                        }
+                    ],
+                )
+
+                content = response.choices[0].message.content
+                if not content:
+                    continue
+                if content.startswith("```json"):
+                    content = content.replace("```json", "").replace("```", "")
+                elif content.startswith("```"):
+                    content = content.replace("```", "")
+
+                segments = json.loads(content)
+                if isinstance(segments, list):
+                    chunk_entries = self._normalize_transcript_entries(
+                        segments, video_title, track_id
+                    )
+                    offset = float(idx * max_chunk_seconds)
+                    for entry in chunk_entries:
+                        entry["start"] = float(entry.get("start", 0.0)) + offset
+                    transcript_entries.extend(chunk_entries)
 
         if not transcript_entries:
             raise RuntimeError("No transcript segments produced from audio")
