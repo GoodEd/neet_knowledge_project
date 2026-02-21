@@ -246,7 +246,7 @@ resource "aws_iam_role_policy" "ecs_task_inline" {
 
   policy = jsonencode({
     Version = "2012-10-17"
-    Statement = [
+    Statement = concat([
       {
         Effect = "Allow"
         Action = [
@@ -279,8 +279,35 @@ resource "aws_iam_role_policy" "ecs_task_inline" {
           var.openai_api_key_secret_arn,
           var.youtube_api_key_secret_arn
         ])
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "s3:GetObject",
+          "s3:GetObjectVersion"
+        ]
+        Resource = [
+          "arn:aws:s3:::${var.asset_bucket_name}/*"
+        ]
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "s3:ListBucket"
+        ]
+        Resource = [
+          "arn:aws:s3:::${var.asset_bucket_name}"
+        ]
       }
-    ]
+      ],
+      length(var.asset_kms_key_arns) > 0 ? [{
+        Effect = "Allow"
+        Action = [
+          "kms:Decrypt"
+        ]
+        Resource = var.asset_kms_key_arns
+      }] : []
+    )
   })
 }
 
@@ -807,6 +834,13 @@ resource "aws_iam_role_policy" "codebuild" {
           "ecr:PutImage"
         ]
         Resource = "*"
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "codestar-connections:UseConnection"
+        ]
+        Resource = var.codestar_connection_arn
       }
     ]
   })

@@ -170,3 +170,15 @@ variable "admin_password" {
   type        = string
   default     = "ihoZfDDpMhARpPjW"
 }
+
+variable "asset_bucket_name" {
+  description = "S3 bucket that stores manual ingestion assets"
+  type        = string
+  default     = "neetprep-static-assets"
+}
+
+variable "asset_kms_key_arns" {
+  description = "Optional KMS key ARNs for decrypting S3 assets"
+  type        = list(string)
+  default     = []
+}
