@@ -114,9 +114,15 @@ Please provide a helpful answer based on the context above."""
             sources = []
             for doc in context_docs:
                 source = getattr(doc, "metadata", {}).get("source", "Unknown")
+                source_type = getattr(doc, "metadata", {}).get(
+                    "source_type"
+                ) or getattr(doc, "metadata", {}).get("content_type")
+                if source_type != "youtube":
+                    continue
                 if source not in sources:
                     sources.append(source)
-            prompt += f"\n\nSources: {', '.join(sources)}"
+            if sources:
+                prompt += f"\n\nSources: {', '.join(sources)}"
 
         return prompt
 

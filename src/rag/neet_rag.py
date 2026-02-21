@@ -267,6 +267,18 @@ class NEETRAG:
         deduped = self._dedupe_docs(filtered)
         return deduped[:top_k]
 
+    @staticmethod
+    def _is_youtube_doc(doc: Document) -> bool:
+        source_type = doc.metadata.get("source_type") or doc.metadata.get(
+            "content_type", ""
+        )
+        return source_type == "youtube"
+
+    def _build_public_sources(self, docs: List[Document]) -> List[Dict[str, Any]]:
+        return [
+            self._build_source_info(doc) for doc in docs if self._is_youtube_doc(doc)
+        ]
+
     def query(
         self, question: str, top_k: int = 5, include_sources: bool = True
     ) -> Dict[str, Any]:
@@ -303,7 +315,7 @@ class NEETRAG:
         except Exception as e:
             answer = f"Error generating answer: {str(e)}"
 
-        sources = [self._build_source_info(doc) for doc in relevant_docs]
+        sources = self._build_public_sources(relevant_docs)
 
         return {"answer": answer, "sources": sources, "question": question}
 
@@ -331,7 +343,7 @@ class NEETRAG:
         except Exception as e:
             answer = f"Error generating answer: {str(e)}"
 
-        sources = [self._build_source_info(doc) for doc in relevant_docs]
+        sources = self._build_public_sources(relevant_docs)
 
         return {"answer": answer, "sources": sources}
 
