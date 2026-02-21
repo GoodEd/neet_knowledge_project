@@ -61,38 +61,52 @@ class YouTubeProcessor:
             if metadata:
                 video_title = metadata.get("title", video_title)
 
-        try:
-            transcript_data = self._get_transcript_with_api(
-                video_id,
-                video_title,
-                track_id=track_id or "yt_api",
-            )
-
-            # If API fetched title, ensure transcript data uses it
-            if self.youtube_client and video_title != "Unknown Video":
-                for entry in transcript_data:
-                    entry["video_title"] = video_title
-
-            if not transcript_data:
-                raise RuntimeError(f"No transcript available for video: {video_id}")
-
-            # 3. Process transcript into chunks
-            documents = self._create_documents(transcript_data, url, video_id)
-
-            return {
-                "documents": documents,
-                "source": url,
-                "video_id": video_id,
-                "total_chunks": len(documents),
-                "processed_at": datetime.now().isoformat(),
-            }
-
-        except Exception as e:
-            error_msg = str(e)
-            logger.error(f"Error processing YouTube video {url}: {error_msg}")
-
-        logger.info("Falling back to audio transcription.")
         transcript_data = []
+        error_msg = "No transcript produced"
+
+        if s3_audio_uri and s3_transcript_json_uri:
+            logger.info(
+                "Both S3 audio and S3 transcript provided; skipping YouTube transcript/download paths and using S3 audio transcription only"
+            )
+            try:
+                transcript_data = self._transcribe_from_s3_audio(
+                    s3_audio_uri=s3_audio_uri,
+                    video_title=video_title,
+                    track_id=track_id or "s3_audio_asr",
+                )
+            except Exception as e:
+                error_msg = str(e)
+                logger.error(f"S3 audio transcription failed: {e}")
+        else:
+            try:
+                transcript_data = self._get_transcript_with_api(
+                    video_id,
+                    video_title,
+                    track_id=track_id or "yt_api",
+                )
+
+                if self.youtube_client and video_title != "Unknown Video":
+                    for entry in transcript_data:
+                        entry["video_title"] = video_title
+
+                if not transcript_data:
+                    raise RuntimeError(f"No transcript available for video: {video_id}")
+
+                documents = self._create_documents(transcript_data, url, video_id)
+
+                return {
+                    "documents": documents,
+                    "source": url,
+                    "video_id": video_id,
+                    "total_chunks": len(documents),
+                    "processed_at": datetime.now().isoformat(),
+                }
+
+            except Exception as e:
+                error_msg = str(e)
+                logger.error(f"Error processing YouTube video {url}: {error_msg}")
+
+        logger.info("Falling back to audio/transcript alternatives.")
 
         try:
             transcript_data = self._transcribe_from_ytdlp_audio(
