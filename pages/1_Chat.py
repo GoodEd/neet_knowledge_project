@@ -8,8 +8,7 @@ from dotenv import load_dotenv
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from src.rag.neet_rag import NEETRAG
-from src.utils.config import Config
+from src.utils.rag_singleton import get_rag_system
 from src.utils.ui_helpers import hide_admin_and_toolbar
 
 load_dotenv()
@@ -56,17 +55,6 @@ def save_history():
         r.setex(
             redis_key, 86400 * 7, json.dumps(st.session_state.messages)
         )  # Save for 7 days
-
-
-# --- RAG Setup ---
-@st.cache_resource
-def get_rag_system():
-    llm_provider = "openai"
-    llm_model = os.getenv("OPENAI_MODEL_NAME", "google/gemini-2.0-flash-001")
-    base_url = os.getenv("OPENAI_BASE_URL", "https://openrouter.ai/api/v1")
-    return NEETRAG(
-        llm_provider=llm_provider, llm_model=llm_model, llm_base_url=base_url
-    )
 
 
 rag = get_rag_system()
