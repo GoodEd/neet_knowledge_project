@@ -632,6 +632,18 @@ resource "aws_codebuild_project" "build" {
       name  = "IMAGE_TAG"
       value = "latest"
     }
+    environment_variable {
+      name  = "ECS_CLUSTER_NAME"
+      value = data.aws_ecs_cluster.shared.cluster_name
+    }
+    environment_variable {
+      name  = "ECS_SERVICE_STREAMLIT"
+      value = aws_ecs_service.streamlit.name
+    }
+    environment_variable {
+      name  = "ECS_SERVICE_WORKER"
+      value = aws_ecs_service.worker.name
+    }
   }
 
   source {
@@ -663,9 +675,10 @@ resource "aws_codepipeline" "main" {
       output_artifacts = ["source_output"]
 
       configuration = {
-        ConnectionArn    = var.codestar_connection_arn
-        FullRepositoryId = var.github_repo_id
-        BranchName       = var.github_branch
+        ConnectionArn        = var.codestar_connection_arn
+        FullRepositoryId     = var.github_repo_id
+        BranchName           = var.github_branch
+        OutputArtifactFormat = "CODEBUILD_CLONE_REF"
       }
     }
   }
@@ -883,4 +896,3 @@ resource "aws_route53_record" "app" {
     evaluate_target_health = true
   }
 }
-
