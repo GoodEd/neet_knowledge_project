@@ -30,7 +30,13 @@ class YouTubeProcessor:
             except Exception as e:
                 logger.warning(f"Failed to initialize YouTube Data API: {e}")
 
-    def process(self, url: str, s3_audio_uri: Optional[str] = None) -> Dict[str, Any]:
+    def process(
+        self,
+        url: str,
+        s3_audio_uri: Optional[str] = None,
+        s3_transcript_json_uri: Optional[str] = None,
+        track_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
         """
         Process a YouTube video URL and return a result dictionary.
 
@@ -56,7 +62,11 @@ class YouTubeProcessor:
                 video_title = metadata.get("title", video_title)
 
         try:
-            transcript_data = self._get_transcript_with_api(video_id, video_title)
+            transcript_data = self._get_transcript_with_api(
+                video_id,
+                video_title,
+                track_id=track_id or "yt_api",
+            )
 
             # If API fetched title, ensure transcript data uses it
             if self.youtube_client and video_title != "Unknown Video":
@@ -88,15 +98,27 @@ class YouTubeProcessor:
             transcript_data = self._transcribe_from_ytdlp_audio(
                 url=url,
                 video_title=video_title,
+                track_id=track_id or "yt_audio_asr",
             )
         except Exception as e:
             logger.error(f"yt-dlp audio fallback failed: {e}")
+
+        if not transcript_data and s3_transcript_json_uri:
+            try:
+                transcript_data = self._load_transcript_from_s3_json(
+                    s3_transcript_json_uri=s3_transcript_json_uri,
+                    video_title=video_title,
+                    track_id=track_id or "s3_transcript",
+                )
+            except Exception as e:
+                logger.error(f"S3 transcript JSON fallback failed: {e}")
 
         if not transcript_data and s3_audio_uri:
             try:
                 transcript_data = self._transcribe_from_s3_audio(
                     s3_audio_uri=s3_audio_uri,
                     video_title=video_title,
+                    track_id=track_id or "s3_audio_asr",
                 )
             except Exception as e:
                 logger.error(f"S3 audio fallback failed: {e}")
@@ -115,8 +137,86 @@ class YouTubeProcessor:
 
         raise RuntimeError(f"Failed to fetch transcript: {error_msg}")
 
+    def _load_transcript_from_s3_json(
+        self, s3_transcript_json_uri: str, video_title: str, track_id: str
+    ) -> List[Dict[str, Any]]:
+        import json
+        import tempfile
+        import boto3
+
+        match = re.match(r"^s3://([^/]+)/(.+)$", s3_transcript_json_uri)
+        if not match:
+            raise ValueError(f"Invalid S3 URI: {s3_transcript_json_uri}")
+
+        bucket = match.group(1)
+        key = match.group(2)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            local_path = os.path.join(
+                tmpdir, os.path.basename(key) or "transcript.json"
+            )
+            s3 = boto3.client("s3", region_name=os.getenv("AWS_REGION"))
+            s3.download_file(bucket, key, local_path)
+            with open(local_path, "r", encoding="utf-8") as f:
+                payload = json.load(f)
+
+        if isinstance(payload, dict):
+            segments = payload.get("segments") or payload.get("transcript") or []
+        elif isinstance(payload, list):
+            segments = payload
+        else:
+            segments = []
+
+        transcript_entries = self._normalize_transcript_entries(
+            segments, video_title, track_id
+        )
+        if not transcript_entries:
+            raise RuntimeError("No transcript segments found in S3 JSON")
+
+        return transcript_entries
+
+    def _normalize_transcript_entries(
+        self, segments: List[Dict[str, Any]], video_title: str, track_id: str
+    ) -> List[Dict[str, Any]]:
+        entries = []
+        for segment in segments:
+            if not isinstance(segment, dict):
+                continue
+            text = (
+                segment.get("text")
+                or segment.get("content")
+                or segment.get("caption")
+                or ""
+            )
+            text = text.strip()
+            if not text:
+                continue
+            start = segment.get("start")
+            if start is None:
+                start = segment.get("start_time", 0.0)
+            duration = segment.get("duration")
+            if duration is None:
+                end = segment.get("end")
+                if end is None:
+                    end = segment.get("end_time")
+                if end is not None:
+                    duration = float(end) - float(start or 0.0)
+                else:
+                    duration = 0.0
+
+            entries.append(
+                {
+                    "text": text,
+                    "start": float(start or 0.0),
+                    "duration": float(duration or 0.0),
+                    "video_title": video_title,
+                    "track_id": track_id,
+                }
+            )
+        return entries
+
     def _get_transcript_with_api(
-        self, video_id: str, video_title: str
+        self, video_id: str, video_title: str, track_id: str
     ) -> List[Dict[str, Any]]:
         preferred_languages = ["en", "en-IN", "hi", "hi-IN"]
 
@@ -167,6 +267,7 @@ class YouTubeProcessor:
                     "start": start,
                     "duration": duration,
                     "video_title": video_title,
+                    "track_id": track_id,
                 }
             )
 
@@ -176,7 +277,7 @@ class YouTubeProcessor:
         return transcript_entries
 
     def _transcribe_from_s3_audio(
-        self, s3_audio_uri: str, video_title: str
+        self, s3_audio_uri: str, video_title: str, track_id: str
     ) -> List[Dict[str, Any]]:
         import tempfile
         import boto3
@@ -192,10 +293,12 @@ class YouTubeProcessor:
             local_path = os.path.join(tmpdir, os.path.basename(key) or "audio.mp3")
             s3 = boto3.client("s3", region_name=os.getenv("AWS_REGION"))
             s3.download_file(bucket, key, local_path)
-            return self._transcribe_audio_file_with_multimodal(local_path, video_title)
+            return self._transcribe_audio_file_with_multimodal(
+                local_path, video_title, track_id
+            )
 
     def _transcribe_from_ytdlp_audio(
-        self, url: str, video_title: str
+        self, url: str, video_title: str, track_id: str
     ) -> List[Dict[str, Any]]:
         import tempfile
 
@@ -222,11 +325,11 @@ class YouTubeProcessor:
                 raise RuntimeError("Audio file not found after yt-dlp download")
 
             return self._transcribe_audio_file_with_multimodal(
-                final_audio_path, video_title
+                final_audio_path, video_title, track_id
             )
 
     def _transcribe_audio_file_with_multimodal(
-        self, audio_path: str, video_title: str
+        self, audio_path: str, video_title: str, track_id: str
     ) -> List[Dict[str, Any]]:
         import base64
         import json
@@ -276,20 +379,9 @@ class YouTubeProcessor:
         segments = json.loads(content)
         transcript_entries = []
         if isinstance(segments, list):
-            for segment in segments:
-                text = (segment.get("text") or "").strip()
-                if not text:
-                    continue
-                start = float(segment.get("start", 0.0) or 0.0)
-                duration = float(segment.get("duration", 0.0) or 0.0)
-                transcript_entries.append(
-                    {
-                        "text": text,
-                        "start": start,
-                        "duration": duration,
-                        "video_title": video_title,
-                    }
-                )
+            transcript_entries = self._normalize_transcript_entries(
+                segments, video_title, track_id
+            )
 
         if not transcript_entries:
             raise RuntimeError("No transcript segments produced from audio")
@@ -441,6 +533,7 @@ class YouTubeProcessor:
                 "title": video_title,
                 "start_time": chunk_start_time,
                 "source_type": "youtube",
+                "track_id": transcript_data[i].get("track_id", ""),
             }
             documents.append(Document(page_content=chunk_text, metadata=meta))
 

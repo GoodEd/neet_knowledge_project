@@ -2,6 +2,7 @@ from typing import Dict, Any, List, Optional, Union
 from pathlib import Path
 import os
 import re
+import logging
 
 from langchain_core.documents import Document
 
@@ -26,6 +27,8 @@ class NEETRAG:
         from src.utils.config import Config
 
         config = Config()
+        self.config = config
+        self.similarity_threshold = config.similarity_threshold
 
         self.content_processor = ContentProcessor(
             chunk_size=chunk_size or config.chunk_size,
@@ -33,7 +36,8 @@ class NEETRAG:
         )
 
         self.vector_manager = VectorStoreManager(
-            persist_directory=persist_directory or os.path.join(os.environ.get("DATA_DIR", "./data"), "faiss_index"),
+            persist_directory=persist_directory
+            or os.path.join(os.environ.get("DATA_DIR", "./data"), "faiss_index"),
             embedding_provider=embedding_provider,
             embedding_model=embedding_model,
             embedding_dimension=embedding_dimension,
@@ -45,6 +49,7 @@ class NEETRAG:
 
         self.prompt_builder = RAGPromptBuilder()
         self._vectorstore_loaded = False
+        self.logger = logging.getLogger(__name__)
 
     def ingest_processed_content(
         self, processed_result: Dict[str, Any]
@@ -193,6 +198,7 @@ class NEETRAG:
         title = doc.metadata.get("title", "")
         video_id = doc.metadata.get("video_id", "")
         timestamp = doc.metadata.get("start_time", 0)
+        track_id = doc.metadata.get("track_id", "")
 
         # Fallback: extract video_id from source URL if missing
         if content_type == "youtube" and not video_id and source:
@@ -203,6 +209,7 @@ class NEETRAG:
             "source": source,
             "content_type": content_type,
             "title": title,
+            "track_id": track_id,
         }
 
         # Add YouTube-specific fields
@@ -216,6 +223,50 @@ class NEETRAG:
 
         return source_info
 
+    @staticmethod
+    def _score_to_similarity(score: float) -> float:
+        try:
+            return 1.0 / (1.0 + float(score))
+        except Exception:
+            return 0.0
+
+    def _dedupe_docs(self, docs: List[Document]) -> List[Document]:
+        deduped = []
+        seen = set()
+        for doc in docs:
+            source_type = doc.metadata.get("source_type") or doc.metadata.get(
+                "content_type", ""
+            )
+            if source_type == "youtube":
+                video_id = doc.metadata.get("video_id", "")
+                start_time = int(float(doc.metadata.get("start_time", 0) or 0))
+                track_id = doc.metadata.get("track_id", "")
+                key = ("youtube", video_id, start_time, track_id)
+            else:
+                key = (
+                    source_type,
+                    doc.metadata.get("source", ""),
+                    doc.page_content[:120],
+                )
+            if key in seen:
+                continue
+            seen.add(key)
+            deduped.append(doc)
+        return deduped
+
+    def _retrieve_docs(self, question: str, top_k: int) -> List[Document]:
+        fetch_k = max(top_k * 4, top_k)
+        scored = self.vector_manager.similarity_search_with_score(question, k=fetch_k)
+        filtered = []
+        for doc, score in scored:
+            sim = self._score_to_similarity(score)
+            if sim >= self.similarity_threshold:
+                filtered.append(doc)
+        if not filtered:
+            filtered = [doc for doc, _ in scored[:top_k]]
+        deduped = self._dedupe_docs(filtered)
+        return deduped[:top_k]
+
     def query(
         self, question: str, top_k: int = 5, include_sources: bool = True
     ) -> Dict[str, Any]:
@@ -226,9 +277,7 @@ class NEETRAG:
                 pass
 
         try:
-            relevant_docs = self.vector_manager.similarity_search(
-                query=question, k=top_k
-            )
+            relevant_docs = self._retrieve_docs(question=question, top_k=top_k)
         except Exception as e:
             return {
                 "question": question,
@@ -247,6 +296,7 @@ class NEETRAG:
         prompt = self.prompt_builder.build_prompt(
             query=question, context_docs=relevant_docs, include_sources=include_sources
         )
+        self.logger.info("LLM prompt payload: %s", prompt)
 
         try:
             answer = self.llm_manager.generate(prompt)
@@ -266,7 +316,7 @@ class NEETRAG:
             except:
                 pass
 
-        relevant_docs = self.vector_manager.similarity_search(query=question, k=top_k)
+        relevant_docs = self._retrieve_docs(question=question, top_k=top_k)
 
         if not relevant_docs:
             return {"answer": "No relevant information found.", "sources": []}
@@ -274,6 +324,7 @@ class NEETRAG:
         prompt = self.prompt_builder.build_with_history(
             query=question, context_docs=relevant_docs, chat_history=chat_history
         )
+        self.logger.info("LLM prompt payload with history: %s", prompt)
 
         try:
             answer = self.llm_manager.generate(prompt)

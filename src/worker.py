@@ -21,7 +21,16 @@ def _extract_job(body: str):
     source_type = data.get("source_type") or data.get("type") or "auto"
     source_id = data.get("source_id")
     s3_audio_uri = data.get("s3_audio_uri")
-    return source_id, source, source_type, s3_audio_uri
+    s3_transcript_json_uri = data.get("s3_transcript_json_uri")
+    track_id = data.get("track_id")
+    return (
+        source_id,
+        source,
+        source_type,
+        s3_audio_uri,
+        s3_transcript_json_uri,
+        track_id,
+    )
 
 
 def main():
@@ -56,7 +65,14 @@ def main():
             body = msg.get("Body", "{}")
 
             try:
-                source_id, source, source_type, s3_audio_uri = _extract_job(body)
+                (
+                    source_id,
+                    source,
+                    source_type,
+                    s3_audio_uri,
+                    s3_transcript_json_uri,
+                    track_id,
+                ) = _extract_job(body)
             except Exception:
                 logger.exception("Invalid message body. Deleting message: %s", body)
                 sqs.delete_message(QueueUrl=queue.queue_url, ReceiptHandle=receipt)
@@ -68,26 +84,40 @@ def main():
                 continue
 
             logger.info(
-                "Processing ingestion job: source_id=%s source=%s type=%s s3_audio_uri=%s",
+                "Processing ingestion job: source_id=%s source=%s type=%s track_id=%s s3_audio_uri=%s s3_transcript_json_uri=%s",
                 source_id,
                 source,
                 source_type,
+                track_id,
                 s3_audio_uri,
+                s3_transcript_json_uri,
             )
             if source_id and source_manager.get_source(source_id):
-                if s3_audio_uri:
+                if s3_audio_uri or s3_transcript_json_uri or track_id:
                     src = source_manager.get_source(source_id)
                     if src:
                         new_metadata = src.metadata or {}
-                        new_metadata["s3_audio_uri"] = s3_audio_uri
+                        if s3_audio_uri:
+                            new_metadata["s3_audio_uri"] = s3_audio_uri
+                        if s3_transcript_json_uri:
+                            new_metadata["s3_transcript_json_uri"] = (
+                                s3_transcript_json_uri
+                            )
+                        if track_id:
+                            new_metadata["track_id"] = track_id
                         source_manager.set_source_metadata(source_id, new_metadata)
                 update_result = updater.update_source(source_id)
                 failed = update_result.get("status") != "success"
                 result = update_result
             else:
-                if source_type == "youtube" and s3_audio_uri:
+                if source_type == "youtube" and (
+                    s3_audio_uri or s3_transcript_json_uri or track_id
+                ):
                     processed = rag.content_processor.process_youtube(
-                        source, s3_audio_uri=s3_audio_uri
+                        source,
+                        s3_audio_uri=s3_audio_uri,
+                        s3_transcript_json_uri=s3_transcript_json_uri,
+                        track_id=track_id,
                     )
                     result = rag.ingest_processed_content(processed)
                     failed = result.get("status") != "success"

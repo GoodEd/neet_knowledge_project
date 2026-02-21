@@ -67,7 +67,13 @@ with col1:
     with st.form("add_source_form"):
         source_url = st.text_input("YouTube URL or PDF Path")
         source_title = st.text_input("Title (Optional)")
+        track_id = st.selectbox(
+            "Transcript Track",
+            ["yt_api", "hinglish_asr", "hindi_english_manual"],
+            index=0,
+        )
         s3_audio_uri = st.text_input("S3 Audio URI (Optional, for YouTube fallback)")
+        s3_transcript_json_uri = st.text_input("S3 Transcript JSON URI (Optional)")
 
         c1, c2 = st.columns(2)
         submit_yt = c1.form_submit_button("Add YouTube")
@@ -75,8 +81,14 @@ with col1:
 
         if submit_yt and source_url:
             metadata = None
-            if s3_audio_uri:
-                metadata = {"s3_audio_uri": s3_audio_uri}
+            if s3_audio_uri or s3_transcript_json_uri or track_id:
+                metadata = {}
+                if track_id:
+                    metadata["track_id"] = track_id
+                if s3_audio_uri:
+                    metadata["s3_audio_uri"] = s3_audio_uri
+                if s3_transcript_json_uri:
+                    metadata["s3_transcript_json_uri"] = s3_transcript_json_uri
             source_id = source_manager.add_youtube(
                 source_url,
                 source_title or None,
@@ -88,6 +100,8 @@ with col1:
                     source_url,
                     "youtube",
                     s3_audio_uri=s3_audio_uri or None,
+                    s3_transcript_json_uri=s3_transcript_json_uri or None,
+                    track_id=track_id or None,
                 )
                 st.success("YouTube source added to ingestion queue.")
             else:
@@ -109,13 +123,19 @@ with col1:
             pending_sources = source_manager.get_sources_needing_update()
             for src in pending_sources:
                 s3_uri = None
+                s3_transcript_uri = None
+                src_track_id = None
                 if src.metadata and isinstance(src.metadata, dict):
                     s3_uri = src.metadata.get("s3_audio_uri")
+                    s3_transcript_uri = src.metadata.get("s3_transcript_json_uri")
+                    src_track_id = src.metadata.get("track_id")
                 ingestion_queue.submit_job(
                     src.source_id,
                     src.url,
                     src.source_type,
                     s3_audio_uri=s3_uri,
+                    s3_transcript_json_uri=s3_transcript_uri,
+                    track_id=src_track_id,
                 )
             st.success(
                 f"Queued {len(pending_sources)} source(s) for background ingestion."
@@ -136,6 +156,39 @@ with col2:
     st.header("Existing Sources Database")
     sources = source_manager.get_all_sources()
 
+    error_sources = [s for s in sources if s.status == "error"]
+    if error_sources:
+        if st.button("Retry All Failed Sources", type="secondary"):
+            if queue_enabled and ingestion_queue:
+                for src in error_sources:
+                    s3_uri = None
+                    s3_transcript_uri = None
+                    src_track_id = None
+                    if src.metadata and isinstance(src.metadata, dict):
+                        s3_uri = src.metadata.get("s3_audio_uri")
+                        s3_transcript_uri = src.metadata.get("s3_transcript_json_uri")
+                        src_track_id = src.metadata.get("track_id")
+                    ingestion_queue.submit_job(
+                        src.source_id,
+                        src.url,
+                        src.source_type,
+                        s3_audio_uri=s3_uri,
+                        s3_transcript_json_uri=s3_transcript_uri,
+                        track_id=src_track_id,
+                    )
+                st.success(f"Queued {len(error_sources)} failed source(s) for retry.")
+            else:
+                with st.status("Retrying failed sources...", expanded=True) as status:
+                    retried = 0
+                    for src in error_sources:
+                        result = updater.update_source(src.source_id)
+                        if result.get("status") == "success":
+                            retried += 1
+                    status.update(label="Retry Complete", state="complete")
+                st.success(
+                    f"Retried {len(error_sources)} failed source(s), {retried} succeeded."
+                )
+
     if not sources:
         st.info("No sources found in the database.")
 
@@ -148,5 +201,39 @@ with col2:
             st.write(f"**Type:** {s.source_type}")
             st.write(f"**Status:** {s.status}")
             st.write(f"**Last Updated:** {s.last_updated}")
+            if (
+                s.metadata
+                and isinstance(s.metadata, dict)
+                and s.metadata.get("track_id")
+            ):
+                st.write(f"**Track ID:** {s.metadata.get('track_id')}")
             if hasattr(s, "error_message") and s.error_message:
                 st.error(f"Error: {s.error_message}")
+
+            if s.status == "error":
+                if st.button("Retry This Source", key=f"retry_{s.source_id}"):
+                    if queue_enabled and ingestion_queue:
+                        s3_uri = None
+                        s3_transcript_uri = None
+                        src_track_id = None
+                        if s.metadata and isinstance(s.metadata, dict):
+                            s3_uri = s.metadata.get("s3_audio_uri")
+                            s3_transcript_uri = s.metadata.get("s3_transcript_json_uri")
+                            src_track_id = s.metadata.get("track_id")
+                        ingestion_queue.submit_job(
+                            s.source_id,
+                            s.url,
+                            s.source_type,
+                            s3_audio_uri=s3_uri,
+                            s3_transcript_json_uri=s3_transcript_uri,
+                            track_id=src_track_id,
+                        )
+                        st.success("Source re-queued for ingestion.")
+                    else:
+                        result = updater.update_source(s.source_id)
+                        if result.get("status") == "success":
+                            st.success("Source retried successfully.")
+                        else:
+                            st.error(
+                                f"Retry failed: {result.get('error', 'Unknown error')}"
+                            )
