@@ -66,6 +66,65 @@ def true_delete_source(src):
     return True, removed_vectors, None
 
 
+def enqueue_source(src):
+    if not (queue_enabled and ingestion_queue):
+        return
+
+    s3_uri = None
+    s3_transcript_uri = None
+    src_track_id = None
+    if src.metadata and isinstance(src.metadata, dict):
+        s3_uri = src.metadata.get("s3_audio_uri")
+        s3_transcript_uri = src.metadata.get("s3_transcript_json_uri")
+        src_track_id = src.metadata.get("track_id")
+
+    ingestion_queue.submit_job(
+        src.source_id,
+        src.url,
+        src.source_type,
+        s3_audio_uri=s3_uri,
+        s3_transcript_json_uri=s3_transcript_uri,
+        track_id=src_track_id,
+    )
+
+
+def recreate_source(src):
+    metadata = src.metadata if isinstance(src.metadata, dict) else None
+    title = src.title
+    fetch_interval_hours = src.fetch_interval_hours
+
+    ok, removed_vectors, err = true_delete_source(src)
+    if not ok:
+        return False, None, removed_vectors, err
+
+    if src.source_type == "youtube":
+        new_id = source_manager.add_youtube(
+            src.url,
+            title,
+            fetch_interval_hours=fetch_interval_hours,
+            metadata=metadata,
+        )
+    elif src.source_type == "pdf":
+        new_id = source_manager.add_pdf(src.url, title, metadata=metadata)
+    elif src.source_type == "html":
+        new_id = source_manager.add_html(
+            src.url,
+            title,
+            fetch_interval_hours=fetch_interval_hours,
+        )
+    else:
+        new_id = source_manager.add_source(
+            src.url,
+            src.source_type,
+            title=title,
+            fetch_interval_hours=fetch_interval_hours,
+            metadata=metadata,
+        )
+
+    new_src = source_manager.get_source(new_id)
+    return True, new_src, removed_vectors, None
+
+
 st.title("⚙️ Content Management Admin")
 st.markdown(
     "Use this panel to ingest and manage documents and videos in the RAG vector store."
@@ -167,39 +226,118 @@ with col2:
     st.header("Existing Sources Database")
     sources = source_manager.get_all_sources()
 
+    if "confirm_recreate_all" not in st.session_state:
+        st.session_state.confirm_recreate_all = False
+    if "confirm_remove_all" not in st.session_state:
+        st.session_state.confirm_remove_all = False
+    if "confirm_recreate_failed" not in st.session_state:
+        st.session_state.confirm_recreate_failed = False
+
     top_a, top_b = st.columns(2)
     with top_a:
-        if st.button("Retry All Sources", type="secondary"):
-            if queue_enabled and ingestion_queue:
-                for src in sources:
-                    s3_uri = None
-                    s3_transcript_uri = None
-                    src_track_id = None
-                    if src.metadata and isinstance(src.metadata, dict):
-                        s3_uri = src.metadata.get("s3_audio_uri")
-                        s3_transcript_uri = src.metadata.get("s3_transcript_json_uri")
-                        src_track_id = src.metadata.get("track_id")
-                    ingestion_queue.submit_job(
-                        src.source_id,
-                        src.url,
-                        src.source_type,
-                        s3_audio_uri=s3_uri,
-                        s3_transcript_json_uri=s3_transcript_uri,
-                        track_id=src_track_id,
-                    )
-                st.success(f"Queued {len(sources)} source(s) for retry.")
-            else:
-                with st.status("Retrying all sources...", expanded=True) as status:
-                    retried = 0
+        if st.button("Recreate All Sources", type="secondary"):
+            st.session_state.confirm_recreate_all = True
+
+        if st.session_state.confirm_recreate_all:
+            st.warning(
+                "Confirm recreate all sources? This will delete existing vectors and metadata before re-ingestion."
+            )
+            c_confirm, c_cancel = st.columns(2)
+            if c_confirm.button("Confirm Recreate All", key="confirm_recreate_all_btn"):
+                st.session_state.confirm_recreate_all = False
+                if queue_enabled and ingestion_queue:
+                    recreated = 0
+                    removed_vectors_total = 0
                     for src in sources:
-                        result = updater.update_source(src.source_id)
-                        if result.get("status") == "success":
-                            retried += 1
-                    status.update(label="Retry Complete", state="complete")
-                st.success(f"Retried {len(sources)} source(s), {retried} succeeded.")
+                        ok, new_src, removed_vectors, err = recreate_source(src)
+                        if ok and new_src:
+                            enqueue_source(new_src)
+                            recreated += 1
+                            removed_vectors_total += removed_vectors
+                    st.success(
+                        f"Recreated {recreated} source(s), removed {removed_vectors_total} old vector chunks, and queued ingestion."
+                    )
+                else:
+                    with st.status(
+                        "Recreating all sources...", expanded=True
+                    ) as status:
+                        recreated = 0
+                        removed_vectors_total = 0
+                        for src in sources:
+                            ok, new_src, removed_vectors, err = recreate_source(src)
+                            if ok and new_src:
+                                result = updater.update_source(new_src.source_id)
+                                if result.get("status") == "success":
+                                    recreated += 1
+                                removed_vectors_total += removed_vectors
+                        status.update(label="Recreate Complete", state="complete")
+                    st.success(
+                        f"Recreated {recreated}/{len(sources)} source(s) with {removed_vectors_total} old vector chunks removed."
+                    )
+            if c_cancel.button("Cancel", key="cancel_recreate_all_btn"):
+                st.session_state.confirm_recreate_all = False
+        elif False:
+            if queue_enabled and ingestion_queue:
+                recreated = 0
+                removed_vectors_total = 0
+                for src in sources:
+                    ok, new_src, removed_vectors, err = recreate_source(src)
+                    if ok and new_src:
+                        enqueue_source(new_src)
+                        recreated += 1
+                        removed_vectors_total += removed_vectors
+                st.success(
+                    f"Recreated {recreated} source(s), removed {removed_vectors_total} old vector chunks, and queued ingestion."
+                )
+            else:
+                with st.status("Recreating all sources...", expanded=True) as status:
+                    recreated = 0
+                    removed_vectors_total = 0
+                    for src in sources:
+                        ok, new_src, removed_vectors, err = recreate_source(src)
+                        if ok and new_src:
+                            result = updater.update_source(new_src.source_id)
+                            if result.get("status") == "success":
+                                recreated += 1
+                            removed_vectors_total += removed_vectors
+                    status.update(label="Recreate Complete", state="complete")
+                st.success(
+                    f"Recreated {recreated}/{len(sources)} source(s) with {removed_vectors_total} old vector chunks removed."
+                )
 
     with top_b:
         if st.button("Remove All Sources", type="secondary"):
+            st.session_state.confirm_remove_all = True
+
+        if st.session_state.confirm_remove_all:
+            st.warning(
+                "Confirm remove all sources? This will permanently delete vectors and metadata."
+            )
+            c_confirm, c_cancel = st.columns(2)
+            if c_confirm.button("Confirm Remove All", key="confirm_remove_all_btn"):
+                st.session_state.confirm_remove_all = False
+                removed = 0
+                removed_vectors_total = 0
+                failed = 0
+                for src in sources:
+                    ok, removed_vectors, err = true_delete_source(src)
+                    if ok:
+                        removed += 1
+                        removed_vectors_total += removed_vectors
+                    else:
+                        failed += 1
+                if failed:
+                    st.warning(
+                        f"Deleted {removed} source(s), failed for {failed}. Removed vectors: {removed_vectors_total}."
+                    )
+                else:
+                    st.success(
+                        f"Removed {removed} source(s) with {removed_vectors_total} vector chunks."
+                    )
+                st.rerun()
+            if c_cancel.button("Cancel", key="cancel_remove_all_btn"):
+                st.session_state.confirm_remove_all = False
+        elif False:
             removed = 0
             removed_vectors_total = 0
             failed = 0
@@ -222,35 +360,76 @@ with col2:
 
     error_sources = [s for s in sources if s.status == "error"]
     if error_sources:
-        if st.button("Retry All Failed Sources", type="secondary"):
-            if queue_enabled and ingestion_queue:
-                for src in error_sources:
-                    s3_uri = None
-                    s3_transcript_uri = None
-                    src_track_id = None
-                    if src.metadata and isinstance(src.metadata, dict):
-                        s3_uri = src.metadata.get("s3_audio_uri")
-                        s3_transcript_uri = src.metadata.get("s3_transcript_json_uri")
-                        src_track_id = src.metadata.get("track_id")
-                    ingestion_queue.submit_job(
-                        src.source_id,
-                        src.url,
-                        src.source_type,
-                        s3_audio_uri=s3_uri,
-                        s3_transcript_json_uri=s3_transcript_uri,
-                        track_id=src_track_id,
-                    )
-                st.success(f"Queued {len(error_sources)} failed source(s) for retry.")
-            else:
-                with st.status("Retrying failed sources...", expanded=True) as status:
-                    retried = 0
+        if st.button("Recreate All Failed Sources", type="secondary"):
+            st.session_state.confirm_recreate_failed = True
+
+        if st.session_state.confirm_recreate_failed:
+            st.warning(
+                "Confirm recreate all failed sources? This will delete old vectors and metadata before re-ingestion."
+            )
+            c_confirm, c_cancel = st.columns(2)
+            if c_confirm.button(
+                "Confirm Recreate Failed", key="confirm_recreate_failed_btn"
+            ):
+                st.session_state.confirm_recreate_failed = False
+                if queue_enabled and ingestion_queue:
+                    recreated = 0
+                    removed_vectors_total = 0
                     for src in error_sources:
-                        result = updater.update_source(src.source_id)
-                        if result.get("status") == "success":
-                            retried += 1
-                    status.update(label="Retry Complete", state="complete")
+                        ok, new_src, removed_vectors, err = recreate_source(src)
+                        if ok and new_src:
+                            enqueue_source(new_src)
+                            recreated += 1
+                            removed_vectors_total += removed_vectors
+                    st.success(
+                        f"Recreated {recreated} failed source(s), removed {removed_vectors_total} old vector chunks, and queued ingestion."
+                    )
+                else:
+                    with st.status(
+                        "Recreating failed sources...", expanded=True
+                    ) as status:
+                        recreated = 0
+                        removed_vectors_total = 0
+                        for src in error_sources:
+                            ok, new_src, removed_vectors, err = recreate_source(src)
+                            if ok and new_src:
+                                result = updater.update_source(new_src.source_id)
+                                if result.get("status") == "success":
+                                    recreated += 1
+                                removed_vectors_total += removed_vectors
+                        status.update(label="Recreate Complete", state="complete")
+                    st.success(
+                        f"Recreated {recreated}/{len(error_sources)} failed source(s) with {removed_vectors_total} old vector chunks removed."
+                    )
+            if c_cancel.button("Cancel", key="cancel_recreate_failed_btn"):
+                st.session_state.confirm_recreate_failed = False
+        elif False:
+            if queue_enabled and ingestion_queue:
+                recreated = 0
+                removed_vectors_total = 0
+                for src in error_sources:
+                    ok, new_src, removed_vectors, err = recreate_source(src)
+                    if ok and new_src:
+                        enqueue_source(new_src)
+                        recreated += 1
+                        removed_vectors_total += removed_vectors
                 st.success(
-                    f"Retried {len(error_sources)} failed source(s), {retried} succeeded."
+                    f"Recreated {recreated} failed source(s), removed {removed_vectors_total} old vector chunks, and queued ingestion."
+                )
+            else:
+                with st.status("Recreating failed sources...", expanded=True) as status:
+                    recreated = 0
+                    removed_vectors_total = 0
+                    for src in error_sources:
+                        ok, new_src, removed_vectors, err = recreate_source(src)
+                        if ok and new_src:
+                            result = updater.update_source(new_src.source_id)
+                            if result.get("status") == "success":
+                                recreated += 1
+                            removed_vectors_total += removed_vectors
+                    status.update(label="Recreate Complete", state="complete")
+                st.success(
+                    f"Recreated {recreated}/{len(error_sources)} failed source(s) with {removed_vectors_total} old vector chunks removed."
                 )
 
     if not sources:
@@ -276,35 +455,100 @@ with col2:
 
             action_a, action_b = st.columns(2)
             with action_a:
-                if st.button("Retry This Source", key=f"retry_{s.source_id}"):
-                    if queue_enabled and ingestion_queue:
-                        s3_uri = None
-                        s3_transcript_uri = None
-                        src_track_id = None
-                        if s.metadata and isinstance(s.metadata, dict):
-                            s3_uri = s.metadata.get("s3_audio_uri")
-                            s3_transcript_uri = s.metadata.get("s3_transcript_json_uri")
-                            src_track_id = s.metadata.get("track_id")
-                        ingestion_queue.submit_job(
-                            s.source_id,
-                            s.url,
-                            s.source_type,
-                            s3_audio_uri=s3_uri,
-                            s3_transcript_json_uri=s3_transcript_uri,
-                            track_id=src_track_id,
-                        )
-                        st.success("Source re-queued for ingestion.")
-                    else:
-                        result = updater.update_source(s.source_id)
-                        if result.get("status") == "success":
-                            st.success("Source retried successfully.")
+                if st.button("Recreate This Source", key=f"recreate_{s.source_id}"):
+                    st.session_state[f"confirm_recreate_{s.source_id}"] = True
+
+                if st.session_state.get(f"confirm_recreate_{s.source_id}", False):
+                    st.warning(
+                        "Confirm recreate this source? This will delete old vectors and metadata first."
+                    )
+                    c_confirm, c_cancel = st.columns(2)
+                    if c_confirm.button(
+                        "Confirm Recreate", key=f"confirm_recreate_btn_{s.source_id}"
+                    ):
+                        st.session_state[f"confirm_recreate_{s.source_id}"] = False
+                        if queue_enabled and ingestion_queue:
+                            ok, new_src, removed_vectors, err = recreate_source(s)
+                            if ok and new_src:
+                                enqueue_source(new_src)
+                                st.success(
+                                    f"Source recreated with {removed_vectors} old vector chunks removed and re-queued."
+                                )
+                                st.rerun()
+                            else:
+                                st.error(f"Recreate failed: {err}")
                         else:
-                            st.error(
-                                f"Retry failed: {result.get('error', 'Unknown error')}"
+                            ok, new_src, removed_vectors, err = recreate_source(s)
+                            if ok and new_src:
+                                result = updater.update_source(new_src.source_id)
+                                if result.get("status") == "success":
+                                    st.success(
+                                        f"Source recreated with {removed_vectors} old vector chunks removed."
+                                    )
+                                    st.rerun()
+                                else:
+                                    st.error(
+                                        f"Recreate ingest failed: {result.get('error', 'Unknown error')}"
+                                    )
+                            else:
+                                st.error(f"Recreate failed: {err}")
+                    if c_cancel.button(
+                        "Cancel", key=f"cancel_recreate_btn_{s.source_id}"
+                    ):
+                        st.session_state[f"confirm_recreate_{s.source_id}"] = False
+                elif False:
+                    if queue_enabled and ingestion_queue:
+                        ok, new_src, removed_vectors, err = recreate_source(s)
+                        if ok and new_src:
+                            enqueue_source(new_src)
+                            st.success(
+                                f"Source recreated with {removed_vectors} old vector chunks removed and re-queued."
                             )
+                            st.rerun()
+                        else:
+                            st.error(f"Recreate failed: {err}")
+                    else:
+                        ok, new_src, removed_vectors, err = recreate_source(s)
+                        if ok and new_src:
+                            result = updater.update_source(new_src.source_id)
+                            if result.get("status") == "success":
+                                st.success(
+                                    f"Source recreated with {removed_vectors} old vector chunks removed."
+                                )
+                                st.rerun()
+                            else:
+                                st.error(
+                                    f"Recreate ingest failed: {result.get('error', 'Unknown error')}"
+                                )
+                        else:
+                            st.error(f"Recreate failed: {err}")
 
             with action_b:
                 if st.button("Remove This Source", key=f"remove_{s.source_id}"):
+                    st.session_state[f"confirm_remove_{s.source_id}"] = True
+
+                if st.session_state.get(f"confirm_remove_{s.source_id}", False):
+                    st.warning(
+                        "Confirm remove this source? This will permanently delete vectors and metadata."
+                    )
+                    c_confirm, c_cancel = st.columns(2)
+                    if c_confirm.button(
+                        "Confirm Remove", key=f"confirm_remove_btn_{s.source_id}"
+                    ):
+                        st.session_state[f"confirm_remove_{s.source_id}"] = False
+                        ok, removed_vectors, err = true_delete_source(s)
+                        if ok:
+                            st.success(
+                                f"Source removed with {removed_vectors} vector chunks deleted."
+                            )
+                            st.rerun()
+                        else:
+                            st.error(f"Failed to remove source: {err}")
+                    if c_cancel.button(
+                        "Cancel", key=f"cancel_remove_btn_{s.source_id}"
+                    ):
+                        st.session_state[f"confirm_remove_{s.source_id}"] = False
+                elif False:
                     ok, removed_vectors, err = true_delete_source(s)
                     if ok:
                         st.success(
