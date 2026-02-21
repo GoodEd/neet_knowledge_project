@@ -17,7 +17,9 @@ class VectorStoreManager:
         embedding_model: str = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
         embedding_dimension: int = 384,
     ):
-        self.persist_directory = persist_directory or os.path.join(os.environ.get("DATA_DIR", "./data"), "faiss_index")
+        self.persist_directory = persist_directory or os.path.join(
+            os.environ.get("DATA_DIR", "./data"), "faiss_index"
+        )
         self.embedding_provider = embedding_provider
         self.embedding_model = embedding_model
         self.embedding_dimension = embedding_dimension
@@ -108,6 +110,41 @@ class VectorStoreManager:
             import shutil
 
             shutil.rmtree(self.persist_directory)
+
+    def delete_by_source(self, source: str, track_id: Optional[str] = None) -> int:
+        if not os.path.exists(self.persist_directory):
+            return 0
+
+        if self.vectorstore is None:
+            self.load_vectorstore()
+
+        doc_map = getattr(self.vectorstore.docstore, "_dict", {})
+        all_docs = [doc for doc in doc_map.values() if isinstance(doc, Document)]
+
+        keep_docs: List[Document] = []
+        removed = 0
+        for doc in all_docs:
+            same_source = doc.metadata.get("source") == source
+            same_track = track_id is None or doc.metadata.get("track_id") == track_id
+            if same_source and same_track:
+                removed += 1
+            else:
+                keep_docs.append(doc)
+
+        if removed == 0:
+            return 0
+
+        if keep_docs:
+            self.vectorstore = FAISS.from_documents(
+                documents=keep_docs,
+                embedding=self.embeddings,
+            )
+            self.vectorstore.save_local(self.persist_directory)
+        else:
+            self.delete_collection()
+            self.vectorstore = None
+
+        return removed
 
     def get_collection_info(self) -> Dict[str, Any]:
         if self.vectorstore is None:

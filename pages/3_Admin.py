@@ -44,6 +44,28 @@ except Exception:
     ingestion_queue = None
     queue_enabled = False
 
+
+def true_delete_source(src):
+    track_id = None
+    if src.metadata and isinstance(src.metadata, dict):
+        track_id = src.metadata.get("track_id")
+
+    try:
+        removed_vectors = rag.vector_manager.delete_by_source(
+            src.url, track_id=track_id
+        )
+    except FileNotFoundError:
+        removed_vectors = 0
+    except Exception as e:
+        return False, 0, str(e)
+
+    removed_source = source_manager.remove_source(src.source_id)
+    if not removed_source:
+        return False, removed_vectors, "Failed to remove source metadata"
+
+    return True, removed_vectors, None
+
+
 st.title("⚙️ Content Management Admin")
 st.markdown(
     "Use this panel to ingest and manage documents and videos in the RAG vector store."
@@ -179,10 +201,23 @@ with col2:
     with top_b:
         if st.button("Remove All Sources", type="secondary"):
             removed = 0
+            removed_vectors_total = 0
+            failed = 0
             for src in sources:
-                if source_manager.remove_source(src.source_id):
+                ok, removed_vectors, err = true_delete_source(src)
+                if ok:
                     removed += 1
-            st.success(f"Removed {removed} source(s).")
+                    removed_vectors_total += removed_vectors
+                else:
+                    failed += 1
+            if failed:
+                st.warning(
+                    f"Deleted {removed} source(s), failed for {failed}. Removed vectors: {removed_vectors_total}."
+                )
+            else:
+                st.success(
+                    f"Removed {removed} source(s) with {removed_vectors_total} vector chunks."
+                )
             st.rerun()
 
     error_sources = [s for s in sources if s.status == "error"]
@@ -270,8 +305,11 @@ with col2:
 
             with action_b:
                 if st.button("Remove This Source", key=f"remove_{s.source_id}"):
-                    if source_manager.remove_source(s.source_id):
-                        st.success("Source removed.")
+                    ok, removed_vectors, err = true_delete_source(s)
+                    if ok:
+                        st.success(
+                            f"Source removed with {removed_vectors} vector chunks deleted."
+                        )
                         st.rerun()
                     else:
-                        st.error("Failed to remove source.")
+                        st.error(f"Failed to remove source: {err}")
