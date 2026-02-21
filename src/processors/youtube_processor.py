@@ -302,7 +302,7 @@ class YouTubeProcessor:
             )
 
     def _download_remote_file(self, uri: str, local_path: str):
-        from urllib.parse import urlparse
+        from urllib.parse import urlparse, unquote
 
         def _download_s3(bucket: str, key: str):
             import boto3
@@ -328,13 +328,22 @@ class YouTubeProcessor:
             vh_match = re.match(r"^([^.]+)\.s3[.-][^.]+\.amazonaws\.com$", host)
             if vh_match and path:
                 bucket = vh_match.group(1)
-                _download_s3(bucket, path)
+                decoded_path = unquote(path)
+                try:
+                    _download_s3(bucket, decoded_path)
+                except Exception:
+                    _download_s3(bucket, path)
                 return
 
             if host.startswith("s3.") and ".amazonaws.com" in host and "/" in path:
                 parts = path.split("/", 1)
                 if len(parts) == 2 and parts[0] and parts[1]:
-                    _download_s3(parts[0], parts[1])
+                    bucket = unquote(parts[0])
+                    decoded_key = unquote(parts[1])
+                    try:
+                        _download_s3(bucket, decoded_key)
+                    except Exception:
+                        _download_s3(bucket, parts[1])
                     return
 
             import requests
