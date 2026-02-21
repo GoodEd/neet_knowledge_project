@@ -838,6 +838,14 @@ resource "aws_iam_role_policy" "codebuild" {
       {
         Effect = "Allow"
         Action = [
+          "ecs:DescribeServices",
+          "ecs:DescribeTaskDefinition"
+        ]
+        Resource = "*"
+      },
+      {
+        Effect = "Allow"
+        Action = [
           "codestar-connections:UseConnection"
         ]
         Resource = var.codestar_connection_arn
