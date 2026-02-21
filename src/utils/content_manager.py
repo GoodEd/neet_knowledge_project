@@ -24,6 +24,7 @@ class ContentSourceManager:
     def __init__(self, storage_path: Optional[str] = None):
         data_dir = os.environ.get("DATA_DIR", "./data")
         self.storage_path = storage_path or os.path.join(data_dir, "sources.db")
+        self.journal_mode = os.environ.get("SQLITE_JOURNAL_MODE", "DELETE")
         os.makedirs(os.path.dirname(self.storage_path), exist_ok=True)
         self.conn = sqlite3.connect(
             self.storage_path, timeout=30, check_same_thread=False
@@ -32,8 +33,33 @@ class ContentSourceManager:
         self._init_db()
         self._migrate_from_json()
 
+    def _reconnect(self):
+        try:
+            self.conn.close()
+        except Exception:
+            pass
+        self.conn = sqlite3.connect(
+            self.storage_path, timeout=30, check_same_thread=False
+        )
+        self.conn.row_factory = sqlite3.Row
+        self._init_db()
+
+    def _with_retry(self, fn):
+        last_error = None
+        for _ in range(2):
+            try:
+                return fn()
+            except sqlite3.OperationalError as e:
+                last_error = e
+                if "disk I/O error" in str(e):
+                    self._reconnect()
+                    continue
+                raise
+        if last_error:
+            raise last_error
+
     def _init_db(self):
-        self.conn.execute("PRAGMA journal_mode=WAL")
+        self.conn.execute(f"PRAGMA journal_mode={self.journal_mode}")
         self.conn.execute("PRAGMA synchronous=NORMAL")
         self.conn.execute("PRAGMA busy_timeout=5000")
         self.conn.execute(
@@ -206,23 +232,29 @@ class ContentSourceManager:
         return cur.rowcount > 0
 
     def get_source(self, source_id: str) -> Optional[ContentSource]:
-        row = self.conn.execute(
-            "SELECT * FROM sources WHERE source_id = ?", (source_id,)
-        ).fetchone()
+        row = self._with_retry(
+            lambda: self.conn.execute(
+                "SELECT * FROM sources WHERE source_id = ?", (source_id,)
+            ).fetchone()
+        )
         if not row:
             return None
         return self._row_to_source(row)
 
     def get_all_sources(self, source_type: Optional[str] = None) -> List[ContentSource]:
         if source_type:
-            rows = self.conn.execute(
-                "SELECT * FROM sources WHERE source_type = ? ORDER BY updated_at DESC",
-                (source_type,),
-            ).fetchall()
+            rows = self._with_retry(
+                lambda: self.conn.execute(
+                    "SELECT * FROM sources WHERE source_type = ? ORDER BY updated_at DESC",
+                    (source_type,),
+                ).fetchall()
+            )
         else:
-            rows = self.conn.execute(
-                "SELECT * FROM sources ORDER BY updated_at DESC"
-            ).fetchall()
+            rows = self._with_retry(
+                lambda: self.conn.execute(
+                    "SELECT * FROM sources ORDER BY updated_at DESC"
+                ).fetchall()
+            )
         return [self._row_to_source(r) for r in rows]
 
     def get_sources_needing_update(self) -> List[ContentSource]:
@@ -253,22 +285,26 @@ class ContentSourceManager:
     ):
         now = datetime.now().isoformat()
         if success:
-            self.conn.execute(
-                """
-                UPDATE sources
-                SET last_fetched = ?, last_updated = ?, status = 'active', error_message = NULL, updated_at = ?
-                WHERE source_id = ?
-                """,
-                (now, now, now, source_id),
+            self._with_retry(
+                lambda: self.conn.execute(
+                    """
+                    UPDATE sources
+                    SET last_fetched = ?, last_updated = ?, status = 'active', error_message = NULL, updated_at = ?
+                    WHERE source_id = ?
+                    """,
+                    (now, now, now, source_id),
+                )
             )
         else:
-            self.conn.execute(
-                """
-                UPDATE sources
-                SET last_fetched = ?, status = 'error', error_message = ?, updated_at = ?
-                WHERE source_id = ?
-                """,
-                (now, error, now, source_id),
+            self._with_retry(
+                lambda: self.conn.execute(
+                    """
+                    UPDATE sources
+                    SET last_fetched = ?, status = 'error', error_message = ?, updated_at = ?
+                    WHERE source_id = ?
+                    """,
+                    (now, error, now, source_id),
+                )
             )
         self.conn.commit()
 
@@ -288,9 +324,11 @@ class ContentSourceManager:
         self.conn.commit()
 
     def set_source_metadata(self, source_id: str, metadata: Dict[str, Any]):
-        self.conn.execute(
-            "UPDATE sources SET metadata = ?, updated_at = ? WHERE source_id = ?",
-            (json.dumps(metadata), datetime.now().isoformat(), source_id),
+        self._with_retry(
+            lambda: self.conn.execute(
+                "UPDATE sources SET metadata = ?, updated_at = ? WHERE source_id = ?",
+                (json.dumps(metadata), datetime.now().isoformat(), source_id),
+            )
         )
         self.conn.commit()
 

@@ -142,21 +142,11 @@ class YouTubeProcessor:
     ) -> List[Dict[str, Any]]:
         import json
         import tempfile
-        import boto3
-
-        match = re.match(r"^s3://([^/]+)/(.+)$", s3_transcript_json_uri)
-        if not match:
-            raise ValueError(f"Invalid S3 URI: {s3_transcript_json_uri}")
-
-        bucket = match.group(1)
-        key = match.group(2)
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            local_path = os.path.join(
-                tmpdir, os.path.basename(key) or "transcript.json"
-            )
-            s3 = boto3.client("s3", region_name=os.getenv("AWS_REGION"))
-            s3.download_file(bucket, key, local_path)
+            local_name = os.path.basename(s3_transcript_json_uri.split("?")[0])
+            local_path = os.path.join(tmpdir, local_name or "transcript.json")
+            self._download_remote_file(s3_transcript_json_uri, local_path)
             with open(local_path, "r", encoding="utf-8") as f:
                 payload = json.load(f)
 
@@ -280,22 +270,37 @@ class YouTubeProcessor:
         self, s3_audio_uri: str, video_title: str, track_id: str
     ) -> List[Dict[str, Any]]:
         import tempfile
-        import boto3
-
-        match = re.match(r"^s3://([^/]+)/(.+)$", s3_audio_uri)
-        if not match:
-            raise ValueError(f"Invalid S3 URI: {s3_audio_uri}")
-
-        bucket = match.group(1)
-        key = match.group(2)
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            local_path = os.path.join(tmpdir, os.path.basename(key) or "audio.mp3")
-            s3 = boto3.client("s3", region_name=os.getenv("AWS_REGION"))
-            s3.download_file(bucket, key, local_path)
+            local_path = os.path.join(tmpdir, "audio.mp3")
+            self._download_remote_file(s3_audio_uri, local_path)
             return self._transcribe_audio_file_with_multimodal(
                 local_path, video_title, track_id
             )
+
+    def _download_remote_file(self, uri: str, local_path: str):
+        if uri.startswith("s3://"):
+            import boto3
+
+            match = re.match(r"^s3://([^/]+)/(.+)$", uri)
+            if not match:
+                raise ValueError(f"Invalid S3 URI: {uri}")
+            bucket = match.group(1)
+            key = match.group(2)
+            s3 = boto3.client("s3", region_name=os.getenv("AWS_REGION"))
+            s3.download_file(bucket, key, local_path)
+            return
+
+        if uri.startswith("http://") or uri.startswith("https://"):
+            import requests
+
+            response = requests.get(uri, timeout=120)
+            response.raise_for_status()
+            with open(local_path, "wb") as f:
+                f.write(response.content)
+            return
+
+        raise ValueError(f"Unsupported URI format: {uri}")
 
     def _transcribe_from_ytdlp_audio(
         self, url: str, video_title: str, track_id: str
