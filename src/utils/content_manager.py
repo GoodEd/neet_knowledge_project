@@ -1,6 +1,7 @@
 import json
 import os
 import sqlite3
+import shutil
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Dict, List, Optional
@@ -44,15 +45,37 @@ class ContentSourceManager:
         self.conn.row_factory = sqlite3.Row
         self._init_db()
 
+    def _recover_malformed_db(self):
+        try:
+            self.conn.close()
+        except Exception:
+            pass
+
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        corrupt_path = f"{self.storage_path}.corrupt.{ts}"
+        if os.path.exists(self.storage_path):
+            shutil.move(self.storage_path, corrupt_path)
+
+        self.conn = sqlite3.connect(
+            self.storage_path, timeout=30, check_same_thread=False
+        )
+        self.conn.row_factory = sqlite3.Row
+        self._init_db()
+        self._migrate_from_json()
+
     def _with_retry(self, fn):
         last_error = None
         for _ in range(2):
             try:
                 return fn()
-            except sqlite3.OperationalError as e:
+            except (sqlite3.OperationalError, sqlite3.DatabaseError) as e:
                 last_error = e
-                if "disk I/O error" in str(e):
+                err = str(e).lower()
+                if "disk i/o error" in err:
                     self._reconnect()
+                    continue
+                if "database disk image is malformed" in err:
+                    self._recover_malformed_db()
                     continue
                 raise
         if last_error:

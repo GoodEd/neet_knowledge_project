@@ -92,9 +92,18 @@ def main():
                 s3_audio_uri,
                 s3_transcript_json_uri,
             )
-            if source_id and source_manager.get_source(source_id):
+            source_record = None
+            if source_id:
+                try:
+                    source_record = source_manager.get_source(source_id)
+                except Exception:
+                    logger.exception(
+                        "Failed reading source from DB; falling back to message payload"
+                    )
+
+            if source_id and source_record:
                 if s3_audio_uri or s3_transcript_json_uri or track_id:
-                    src = source_manager.get_source(source_id)
+                    src = source_record
                     if src:
                         new_metadata = src.metadata or {}
                         if s3_audio_uri:

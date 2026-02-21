@@ -156,6 +156,46 @@ with col2:
     st.header("Existing Sources Database")
     sources = source_manager.get_all_sources()
 
+    top_a, top_b = st.columns(2)
+    with top_a:
+        if st.button("Retry All Sources", type="secondary"):
+            if queue_enabled and ingestion_queue:
+                for src in sources:
+                    s3_uri = None
+                    s3_transcript_uri = None
+                    src_track_id = None
+                    if src.metadata and isinstance(src.metadata, dict):
+                        s3_uri = src.metadata.get("s3_audio_uri")
+                        s3_transcript_uri = src.metadata.get("s3_transcript_json_uri")
+                        src_track_id = src.metadata.get("track_id")
+                    ingestion_queue.submit_job(
+                        src.source_id,
+                        src.url,
+                        src.source_type,
+                        s3_audio_uri=s3_uri,
+                        s3_transcript_json_uri=s3_transcript_uri,
+                        track_id=src_track_id,
+                    )
+                st.success(f"Queued {len(sources)} source(s) for retry.")
+            else:
+                with st.status("Retrying all sources...", expanded=True) as status:
+                    retried = 0
+                    for src in sources:
+                        result = updater.update_source(src.source_id)
+                        if result.get("status") == "success":
+                            retried += 1
+                    status.update(label="Retry Complete", state="complete")
+                st.success(f"Retried {len(sources)} source(s), {retried} succeeded.")
+
+    with top_b:
+        if st.button("Remove All Sources", type="secondary"):
+            removed = 0
+            for src in sources:
+                if source_manager.remove_source(src.source_id):
+                    removed += 1
+            st.success(f"Removed {removed} source(s).")
+            st.rerun()
+
     error_sources = [s for s in sources if s.status == "error"]
     if error_sources:
         if st.button("Retry All Failed Sources", type="secondary"):
@@ -210,7 +250,8 @@ with col2:
             if hasattr(s, "error_message") and s.error_message:
                 st.error(f"Error: {s.error_message}")
 
-            if s.status == "error":
+            action_a, action_b = st.columns(2)
+            with action_a:
                 if st.button("Retry This Source", key=f"retry_{s.source_id}"):
                     if queue_enabled and ingestion_queue:
                         s3_uri = None
@@ -237,3 +278,11 @@ with col2:
                             st.error(
                                 f"Retry failed: {result.get('error', 'Unknown error')}"
                             )
+
+            with action_b:
+                if st.button("Remove This Source", key=f"remove_{s.source_id}"):
+                    if source_manager.remove_source(s.source_id):
+                        st.success("Source removed.")
+                        st.rerun()
+                    else:
+                        st.error("Failed to remove source.")
