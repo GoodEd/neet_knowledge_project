@@ -2,6 +2,7 @@ import json
 import os
 import sqlite3
 import shutil
+import time
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Dict, List, Optional
@@ -82,9 +83,9 @@ class ContentSourceManager:
             raise last_error
 
     def _init_db(self):
-        self.conn.execute(f"PRAGMA journal_mode={self.journal_mode}")
-        self.conn.execute("PRAGMA synchronous=NORMAL")
         self.conn.execute("PRAGMA busy_timeout=5000")
+        self._set_journal_mode_safely()
+        self.conn.execute("PRAGMA synchronous=NORMAL")
         self.conn.execute(
             """
             CREATE TABLE IF NOT EXISTS sources (
@@ -110,6 +111,17 @@ class ContentSourceManager:
             "CREATE INDEX IF NOT EXISTS idx_sources_type ON sources(source_type)"
         )
         self.conn.commit()
+
+    def _set_journal_mode_safely(self):
+        for _ in range(4):
+            try:
+                self.conn.execute(f"PRAGMA journal_mode={self.journal_mode}")
+                return
+            except sqlite3.OperationalError as e:
+                if "database is locked" in str(e).lower():
+                    time.sleep(0.5)
+                    continue
+                raise
 
     def _migrate_from_json(self):
         row = self.conn.execute("SELECT COUNT(1) AS c FROM sources").fetchone()
