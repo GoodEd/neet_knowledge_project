@@ -497,6 +497,16 @@ class YouTubeProcessor:
         content = response.choices[0].message.content
         if not content:
             return []
+
+        if not isinstance(content, str):
+            try:
+                content = json.dumps(content, ensure_ascii=False)
+            except Exception:
+                content = str(content)
+
+        logger.info(
+            "Transcription model raw output (len=%s): %s", len(content), content[:4000]
+        )
         return self._parse_segments_json(content)
 
     def _parse_segments_json(self, content: str) -> List[Dict[str, Any]]:
@@ -525,8 +535,17 @@ class YouTubeProcessor:
                 parsed = json.loads(candidate)
                 if isinstance(parsed, list):
                     return parsed
+                if isinstance(parsed, dict):
+                    maybe = parsed.get("segments") or parsed.get("transcript")
+                    if isinstance(maybe, list):
+                        return maybe
             except Exception:
                 continue
+
+        # Fallback: treat model output as plain transcript text
+        fallback_text = re.sub(r"\s+", " ", text).strip()
+        if fallback_text:
+            return [{"text": fallback_text, "start": 0, "duration": 0}]
 
         raise RuntimeError("Unable to parse transcript JSON from model output")
 
