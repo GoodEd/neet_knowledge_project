@@ -74,9 +74,18 @@ class YouTubeProcessor:
                     video_title=video_title,
                     track_id=track_id or "s3_audio_asr",
                 )
+                documents = self._create_documents(transcript_data, url, video_id)
+                return {
+                    "documents": documents,
+                    "source": url,
+                    "video_id": video_id,
+                    "total_chunks": len(documents),
+                    "processed_at": datetime.now().isoformat(),
+                }
             except Exception as e:
                 error_msg = str(e)
                 logger.error(f"S3 audio transcription failed: {e}")
+                raise RuntimeError(f"Failed to fetch transcript: {error_msg}")
         else:
             try:
                 transcript_data = self._get_transcript_with_api(
@@ -293,19 +302,41 @@ class YouTubeProcessor:
             )
 
     def _download_remote_file(self, uri: str, local_path: str):
-        if uri.startswith("s3://"):
+        from urllib.parse import urlparse
+
+        def _download_s3(bucket: str, key: str):
             import boto3
 
+            s3 = boto3.client("s3", region_name=os.getenv("AWS_REGION"))
+            s3.download_file(bucket, key, local_path)
+
+        if uri.startswith("s3://"):
             match = re.match(r"^s3://([^/]+)/(.+)$", uri)
             if not match:
                 raise ValueError(f"Invalid S3 URI: {uri}")
             bucket = match.group(1)
             key = match.group(2)
-            s3 = boto3.client("s3", region_name=os.getenv("AWS_REGION"))
-            s3.download_file(bucket, key, local_path)
+            _download_s3(bucket, key)
             return
 
         if uri.startswith("http://") or uri.startswith("https://"):
+            parsed = urlparse(uri)
+            host = parsed.netloc
+            path = parsed.path.lstrip("/")
+
+            # Handle S3 virtual-hosted style and path-style URLs via IAM auth
+            vh_match = re.match(r"^([^.]+)\.s3[.-][^.]+\.amazonaws\.com$", host)
+            if vh_match and path:
+                bucket = vh_match.group(1)
+                _download_s3(bucket, path)
+                return
+
+            if host.startswith("s3.") and ".amazonaws.com" in host and "/" in path:
+                parts = path.split("/", 1)
+                if len(parts) == 2 and parts[0] and parts[1]:
+                    _download_s3(parts[0], parts[1])
+                    return
+
             import requests
 
             response = requests.get(uri, timeout=120)
