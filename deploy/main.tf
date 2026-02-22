@@ -610,30 +610,80 @@ resource "aws_appautoscaling_target" "worker" {
   max_capacity       = var.worker_max_capacity
 }
 
-resource "aws_appautoscaling_policy" "worker_sqs" {
-  name               = "${local.name_prefix}-worker-sqs"
-  policy_type        = "TargetTrackingScaling"
+resource "aws_appautoscaling_policy" "worker_scale_out" {
+  name               = "${local.name_prefix}-worker-scale-out"
+  policy_type        = "StepScaling"
   service_namespace  = aws_appautoscaling_target.worker.service_namespace
   resource_id        = aws_appautoscaling_target.worker.resource_id
   scalable_dimension = aws_appautoscaling_target.worker.scalable_dimension
 
-  target_tracking_scaling_policy_configuration {
-    target_value = 10
+  step_scaling_policy_configuration {
+    adjustment_type         = "ChangeInCapacity"
+    cooldown                = 30
+    metric_aggregation_type = "Maximum"
 
-    customized_metric_specification {
-      namespace   = "AWS/SQS"
-      metric_name = "ApproximateNumberOfMessagesVisible"
-      statistic   = "Average"
-
-      dimensions {
-        name  = "QueueName"
-        value = aws_sqs_queue.ingestion.name
-      }
+    step_adjustment {
+      metric_interval_lower_bound = 0
+      scaling_adjustment          = 1
     }
-
-    scale_in_cooldown  = 120
-    scale_out_cooldown = 60
   }
+}
+
+resource "aws_appautoscaling_policy" "worker_scale_in" {
+  name               = "${local.name_prefix}-worker-scale-in"
+  policy_type        = "StepScaling"
+  service_namespace  = aws_appautoscaling_target.worker.service_namespace
+  resource_id        = aws_appautoscaling_target.worker.resource_id
+  scalable_dimension = aws_appautoscaling_target.worker.scalable_dimension
+
+  step_scaling_policy_configuration {
+    adjustment_type         = "ChangeInCapacity"
+    cooldown                = 90
+    metric_aggregation_type = "Maximum"
+
+    step_adjustment {
+      metric_interval_upper_bound = 0
+      scaling_adjustment          = -1
+    }
+  }
+}
+
+resource "aws_cloudwatch_metric_alarm" "worker_sqs_messages_high" {
+  alarm_name          = "${local.name_prefix}-worker-sqs-messages-high"
+  alarm_description   = "Scale out worker when SQS queue has messages"
+  namespace           = "AWS/SQS"
+  metric_name         = "ApproximateNumberOfMessagesVisible"
+  statistic           = "Maximum"
+  period              = 60
+  evaluation_periods  = 1
+  threshold           = 1
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  treat_missing_data  = "notBreaching"
+
+  dimensions = {
+    QueueName = aws_sqs_queue.ingestion.name
+  }
+
+  alarm_actions = [aws_appautoscaling_policy.worker_scale_out.arn]
+}
+
+resource "aws_cloudwatch_metric_alarm" "worker_sqs_messages_low" {
+  alarm_name          = "${local.name_prefix}-worker-sqs-messages-low"
+  alarm_description   = "Scale in worker when SQS queue is empty"
+  namespace           = "AWS/SQS"
+  metric_name         = "ApproximateNumberOfMessagesVisible"
+  statistic           = "Maximum"
+  period              = 60
+  evaluation_periods  = 2
+  threshold           = 0
+  comparison_operator = "LessThanOrEqualToThreshold"
+  treat_missing_data  = "breaching"
+
+  dimensions = {
+    QueueName = aws_sqs_queue.ingestion.name
+  }
+
+  alarm_actions = [aws_appautoscaling_policy.worker_scale_in.arn]
 }
 
 

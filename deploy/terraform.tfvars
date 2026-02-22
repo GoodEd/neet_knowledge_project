@@ -34,7 +34,7 @@ streamlit_max_capacity  = 10
 
 worker_desired_count = 0
 worker_min_capacity  = 0
-worker_max_capacity  = 4
+worker_max_capacity  = 1
 
 # App config
 openai_base_url   = "https://openrouter.ai/api/v1"
