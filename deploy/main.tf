@@ -298,6 +298,16 @@ resource "aws_iam_role_policy" "ecs_task_inline" {
         Resource = [
           "arn:aws:s3:::${var.asset_bucket_name}"
         ]
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "ssmmessages:CreateControlChannel",
+          "ssmmessages:CreateDataChannel",
+          "ssmmessages:OpenControlChannel",
+          "ssmmessages:OpenDataChannel"
+        ]
+        Resource = "*"
       }
       ],
       length(var.asset_kms_key_arns) > 0 ? [{
@@ -491,11 +501,12 @@ resource "aws_ecs_task_definition" "worker" {
 }
 
 resource "aws_ecs_service" "streamlit" {
-  name            = "${local.name_prefix}-streamlit"
-  cluster         = data.aws_ecs_cluster.shared.id
-  task_definition = aws_ecs_task_definition.streamlit.arn
-  desired_count   = var.streamlit_desired_count
-  launch_type     = "FARGATE"
+  name                   = "${local.name_prefix}-streamlit"
+  cluster                = data.aws_ecs_cluster.shared.id
+  task_definition        = aws_ecs_task_definition.streamlit.arn
+  desired_count          = var.streamlit_desired_count
+  launch_type            = "FARGATE"
+  enable_execute_command = var.enable_ecs_exec
 
   network_configuration {
     subnets          = var.private_subnet_ids
@@ -520,11 +531,12 @@ resource "aws_ecs_service" "streamlit" {
 }
 
 resource "aws_ecs_service" "worker" {
-  name            = "${local.name_prefix}-worker"
-  cluster         = data.aws_ecs_cluster.shared.id
-  task_definition = aws_ecs_task_definition.worker.arn
-  desired_count   = var.worker_desired_count
-  launch_type     = "FARGATE"
+  name                   = "${local.name_prefix}-worker"
+  cluster                = data.aws_ecs_cluster.shared.id
+  task_definition        = aws_ecs_task_definition.worker.arn
+  desired_count          = var.worker_desired_count
+  launch_type            = "FARGATE"
+  enable_execute_command = var.enable_ecs_exec
 
   network_configuration {
     subnets          = var.private_subnet_ids

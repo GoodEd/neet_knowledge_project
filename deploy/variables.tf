@@ -182,3 +182,9 @@ variable "asset_kms_key_arns" {
   type        = list(string)
   default     = []
 }
+
+variable "enable_ecs_exec" {
+  description = "Enable ECS Exec for shell access into running tasks"
+  type        = bool
+  default     = true
+}

@@ -37,3 +37,7 @@ output "sqs_queue_url" {
 output "app_url" {
   value = "https://${var.app_fqdn}:${var.neet_listener_port}"
 }
+
+output "ecs_exec_enabled" {
+  value = var.enable_ecs_exec
+}
