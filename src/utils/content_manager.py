@@ -262,9 +262,13 @@ class ContentSourceManager:
         )
 
     def remove_source(self, source_id: str) -> bool:
-        cur = self.conn.execute("DELETE FROM sources WHERE source_id = ?", (source_id,))
+        cur = self._with_retry(
+            lambda: self.conn.execute(
+                "DELETE FROM sources WHERE source_id = ?", (source_id,)
+            )
+        )
         self.conn.commit()
-        return cur.rowcount > 0
+        return bool(cur and cur.rowcount > 0)
 
     def get_source(self, source_id: str) -> Optional[ContentSource]:
         row = self._with_retry(

@@ -59,7 +59,10 @@ def true_delete_source(src):
     except Exception as e:
         return False, 0, str(e)
 
-    removed_source = source_manager.remove_source(src.source_id)
+    try:
+        removed_source = source_manager.remove_source(src.source_id)
+    except Exception as e:
+        return False, removed_vectors, str(e)
     if not removed_source:
         return False, removed_vectors, "Failed to remove source metadata"
 
