@@ -12,9 +12,32 @@ locals {
 
   redis_url = var.redis_auth_token != null ? format("rediss://:%s@%s:6379/0", var.redis_auth_token, aws_elasticache_replication_group.redis.primary_endpoint_address) : format("redis://%s:6379/0", aws_elasticache_replication_group.redis.primary_endpoint_address)
 
-  container_secrets = concat(
-    var.openai_api_key_secret_arn != "" ? [{ name = "OPENAI_API_KEY", valueFrom = var.openai_api_key_secret_arn }] : [],
+  streamlit_openai_value = var.streamlit_openai_api_key_secret_arn != "" ? var.streamlit_openai_api_key_secret_arn : var.openai_api_key_secret_arn
+  worker_openai_value    = var.worker_openai_api_key_secret_arn != "" ? var.worker_openai_api_key_secret_arn : var.openai_api_key_secret_arn
+
+  streamlit_openai_is_arn = can(regex("^arn:aws:secretsmanager:", local.streamlit_openai_value))
+  worker_openai_is_arn    = can(regex("^arn:aws:secretsmanager:", local.worker_openai_value))
+
+  streamlit_container_secrets = concat(
+    local.streamlit_openai_value != "" && local.streamlit_openai_is_arn ? [{ name = "OPENAI_API_KEY", valueFrom = local.streamlit_openai_value }] : [],
     var.youtube_api_key_secret_arn != "" ? [{ name = "YOUTUBE_API_KEY", valueFrom = var.youtube_api_key_secret_arn }] : []
+  )
+
+  worker_container_secrets = concat(
+    local.worker_openai_value != "" && local.worker_openai_is_arn ? [{ name = "OPENAI_API_KEY", valueFrom = local.worker_openai_value }] : [],
+    var.youtube_api_key_secret_arn != "" ? [{ name = "YOUTUBE_API_KEY", valueFrom = var.youtube_api_key_secret_arn }] : []
+  )
+
+  streamlit_openai_plain_env = local.streamlit_openai_value != "" && !local.streamlit_openai_is_arn ? [{ name = "OPENAI_API_KEY", value = local.streamlit_openai_value }] : []
+
+  openai_secret_arns = compact([
+    local.streamlit_openai_is_arn ? local.streamlit_openai_value : "",
+    local.worker_openai_is_arn ? local.worker_openai_value : ""
+  ])
+
+  exec_secret_arns = concat(
+    local.openai_secret_arns,
+    var.youtube_api_key_secret_arn != "" ? [var.youtube_api_key_secret_arn] : []
   )
 }
 
@@ -275,10 +298,10 @@ resource "aws_iam_role_policy" "ecs_task_inline" {
         Action = [
           "secretsmanager:GetSecretValue"
         ]
-        Resource = compact([
-          var.openai_api_key_secret_arn,
-          var.youtube_api_key_secret_arn
-        ])
+        Resource = concat(
+          local.openai_secret_arns,
+          var.youtube_api_key_secret_arn != "" ? [var.youtube_api_key_secret_arn] : []
+        )
       },
       {
         Effect = "Allow"
@@ -397,7 +420,7 @@ resource "aws_ecs_task_definition" "streamlit" {
         }
       ]
 
-      environment = [
+      environment = concat([
         { name = "AWS_REGION", value = var.aws_region },
         { name = "OPENAI_BASE_URL", value = var.openai_base_url },
         { name = "OPENAI_MODEL_NAME", value = var.openai_model_name },
@@ -405,9 +428,9 @@ resource "aws_ecs_task_definition" "streamlit" {
         { name = "REDIS_URL", value = local.redis_url },
         { name = "SQS_QUEUE_URL", value = aws_sqs_queue.ingestion.url },
         { name = "ADMIN_PASSWORD", value = var.admin_password }
-      ]
+      ], local.streamlit_openai_plain_env)
 
-      secrets = local.container_secrets
+      secrets = local.streamlit_container_secrets
 
       mountPoints = [
         {
@@ -476,7 +499,7 @@ resource "aws_ecs_task_definition" "worker" {
         { name = "ADMIN_PASSWORD", value = var.admin_password }
       ]
 
-      secrets = local.container_secrets
+      secrets = local.worker_container_secrets
 
       mountPoints = [
         {

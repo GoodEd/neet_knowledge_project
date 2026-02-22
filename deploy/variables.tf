@@ -116,6 +116,19 @@ variable "openai_api_key_secret_arn" {
   default     = ""
 }
 
+variable "streamlit_openai_api_key_secret_arn" {
+  description = "Streamlit OPENAI_API_KEY secret ARN. If non-ARN value is passed, it is used directly as env value."
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
+variable "worker_openai_api_key_secret_arn" {
+  description = "Worker OPENAI_API_KEY secret ARN"
+  type        = string
+  default     = ""
+}
+
 variable "youtube_api_key_secret_arn" {
   description = "Secrets Manager ARN for YOUTUBE_API_KEY"
   type        = string

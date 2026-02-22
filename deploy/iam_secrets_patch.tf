@@ -1,4 +1,6 @@
 resource "aws_iam_role_policy" "ecs_execution_secrets" {
+  count = length(local.exec_secret_arns) > 0 ? 1 : 0
+
   name = "${local.name_prefix}-exec-secrets-policy"
   role = aws_iam_role.ecs_execution.id
 
@@ -10,10 +12,7 @@ resource "aws_iam_role_policy" "ecs_execution_secrets" {
         Action = [
           "secretsmanager:GetSecretValue"
         ]
-        Resource = compact([
-          var.openai_api_key_secret_arn,
-          var.youtube_api_key_secret_arn
-        ])
+        Resource = local.exec_secret_arns
       }
     ]
   })

@@ -41,8 +41,10 @@ openai_base_url   = "https://openrouter.ai/api/v1"
 openai_model_name = "google/gemini-2.0-flash-001"
 
 # Secrets (recommended: keep these in Secrets Manager)
-openai_api_key_secret_arn  = "arn:aws:secretsmanager:ap-south-1:559387212220:secret:neet-knowledge/openai-api-key-gycOp3"
-youtube_api_key_secret_arn = ""
+openai_api_key_secret_arn           = ""
+worker_openai_api_key_secret_arn    = "arn:aws:secretsmanager:ap-south-1:559387212220:secret:neet-knowledge/openai-api-key-gycOp3"
+streamlit_openai_api_key_secret_arn = "arn:aws:secretsmanager:ap-south-1:559387212220:secret:neet-knowledge/openai-api-key-streamlit-H0r8cB"
+youtube_api_key_secret_arn          = ""
 
 # Redis
 redis_node_type          = "cache.t3.micro"
