@@ -907,6 +907,36 @@ class YouTubeProcessor:
         out = re.sub(r"\bpi\s*r\s*\^?\s*2\b", "pi r^2", out, flags=re.IGNORECASE)
         return out
 
+    def _contains_devanagari(self, text: str) -> bool:
+        if not text:
+            return False
+        return re.search(r"[\u0900-\u097F]", text) is not None
+
+    def _build_embedding_text_for_yt_api(self, text: str) -> str:
+        if not text:
+            return text
+
+        enabled = (
+            os.getenv("ENABLE_YT_API_TRANSLIT_EMBED", "true").strip().lower() == "true"
+        )
+        if not enabled or not self._contains_devanagari(text):
+            return text
+
+        try:
+            from indic_transliteration import sanscript
+            from indic_transliteration.sanscript import transliterate
+
+            scheme = os.getenv("YT_API_TRANSLIT_SCHEME", "OPTITRANS").strip().upper()
+            target_scheme = getattr(sanscript, scheme, sanscript.OPTITRANS)
+            translit = transliterate(text, sanscript.DEVANAGARI, target_scheme)
+            translit = re.sub(r"\s+", " ", translit).strip()
+            if not translit:
+                return text
+            return f"{text}\n[romanized]\n{translit}"
+        except Exception as e:
+            logger.warning("YT transcript transliteration failed: %s", e)
+            return text
+
     def _request_transcript_segments(
         self,
         client,
@@ -1124,6 +1154,9 @@ class YouTubeProcessor:
                 j += 1
 
             chunk_text = " ".join(chunk_text_parts)
+            chunk_track_id = transcript_data[i].get("track_id", "")
+            if chunk_track_id.startswith("yt_api"):
+                chunk_text = self._build_embedding_text_for_yt_api(chunk_text)
             meta = {
                 "source": url,
                 "video_id": video_id,
