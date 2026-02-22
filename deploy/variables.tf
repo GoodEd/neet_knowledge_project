@@ -135,12 +135,6 @@ variable "youtube_api_key_secret_arn" {
   default     = ""
 }
 
-variable "worker_hf_token_secret_arn" {
-  description = "Secrets Manager ARN for worker HF_TOKEN"
-  type        = string
-  default     = ""
-}
-
 variable "redis_node_type" {
   type    = string
   default = "cache.t3.micro"

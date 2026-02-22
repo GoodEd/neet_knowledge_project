@@ -237,7 +237,7 @@ class ContentSourceManager:
         if metadata and isinstance(metadata, dict):
             track_id = metadata.get("track_id")
         source_key = f"{url}::{track_id}" if track_id else url
-        source_id = self.add_source(
+        return self.add_source(
             url,
             "youtube",
             title,
@@ -245,47 +245,6 @@ class ContentSourceManager:
             metadata,
             source_key=source_key,
         )
-
-        if track_id == "yt_api":
-            companion_track = "yt_api_transliterate"
-            existing = self.get_source_by_url_and_track(url, companion_track)
-            if not existing:
-                companion_metadata = (
-                    dict(metadata) if isinstance(metadata, dict) else {}
-                )
-                companion_metadata["track_id"] = companion_track
-                companion_key = f"{url}::{companion_track}"
-                self.add_source(
-                    url,
-                    "youtube",
-                    title,
-                    fetch_interval_hours,
-                    companion_metadata,
-                    source_key=companion_key,
-                )
-
-        return source_id
-
-    def get_source_by_url_and_track(
-        self, url: str, track_id: str
-    ) -> Optional[ContentSource]:
-        candidates = (
-            self._with_retry(
-                lambda: self.conn.execute(
-                    "SELECT * FROM sources WHERE url = ? AND source_type = 'youtube'",
-                    (url,),
-                ).fetchall()
-            )
-            or []
-        )
-        for row in candidates:
-            src = self._row_to_source(row)
-            meta_track = None
-            if src.metadata and isinstance(src.metadata, dict):
-                meta_track = src.metadata.get("track_id")
-            if meta_track == track_id:
-                return src
-        return None
 
     def add_html(
         self, url: str, title: Optional[str] = None, fetch_interval_hours: int = 24
@@ -303,25 +262,7 @@ class ContentSourceManager:
         )
 
     def remove_source(self, source_id: str) -> bool:
-        src = self.get_source(source_id)
-        if not src:
-            return False
-
         cur = self.conn.execute("DELETE FROM sources WHERE source_id = ?", (source_id,))
-
-        track_id = None
-        if src.metadata and isinstance(src.metadata, dict):
-            track_id = src.metadata.get("track_id")
-
-        if src.source_type == "youtube" and track_id == "yt_api":
-            companion = self.get_source_by_url_and_track(
-                src.url, "yt_api_transliterate"
-            )
-            if companion:
-                self.conn.execute(
-                    "DELETE FROM sources WHERE source_id = ?", (companion.source_id,)
-                )
-
         self.conn.commit()
         return cur.rowcount > 0
 

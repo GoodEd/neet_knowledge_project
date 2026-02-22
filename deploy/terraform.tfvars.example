@@ -34,7 +34,6 @@ openai_api_key_secret_arn            = ""
 worker_openai_api_key_secret_arn     = "arn:aws:secretsmanager:ap-south-1:559387212220:secret:openai-api-key-worker-xxxx"
 streamlit_openai_api_key_secret_arn  = "arn:aws:secretsmanager:ap-south-1:559387212220:secret:openai-api-key-streamlit-xxxx"
 youtube_api_key_secret_arn            = ""
-worker_hf_token_secret_arn            = "arn:aws:secretsmanager:ap-south-1:559387212220:secret:hf-token-worker-xxxx"
 
 # Redis
 # Set null to disable AUTH token; or set strong token string.

@@ -25,8 +25,7 @@ locals {
 
   worker_container_secrets = concat(
     local.worker_openai_value != "" && local.worker_openai_is_arn ? [{ name = "OPENAI_API_KEY", valueFrom = local.worker_openai_value }] : [],
-    var.youtube_api_key_secret_arn != "" ? [{ name = "YOUTUBE_API_KEY", valueFrom = var.youtube_api_key_secret_arn }] : [],
-    var.worker_hf_token_secret_arn != "" ? [{ name = "HF_TOKEN", valueFrom = var.worker_hf_token_secret_arn }] : []
+    var.youtube_api_key_secret_arn != "" ? [{ name = "YOUTUBE_API_KEY", valueFrom = var.youtube_api_key_secret_arn }] : []
   )
 
   streamlit_openai_plain_env = local.streamlit_openai_value != "" && !local.streamlit_openai_is_arn ? [{ name = "OPENAI_API_KEY", value = local.streamlit_openai_value }] : []
@@ -38,8 +37,7 @@ locals {
 
   exec_secret_arns = concat(
     local.openai_secret_arns,
-    var.youtube_api_key_secret_arn != "" ? [var.youtube_api_key_secret_arn] : [],
-    var.worker_hf_token_secret_arn != "" ? [var.worker_hf_token_secret_arn] : []
+    var.youtube_api_key_secret_arn != "" ? [var.youtube_api_key_secret_arn] : []
   )
 }
 
