@@ -494,8 +494,8 @@ class YouTubeProcessor:
         if not hf_token:
             raise RuntimeError("HF_TOKEN is not set")
 
-        provider = os.getenv("HF_ASR_PROVIDER", "auto")
-        model = os.getenv("HF_ASR_MODEL", "openai/whisper-large-v3:fastest")
+        provider = os.getenv("HF_ASR_PROVIDER", "replicate")
+        model = os.getenv("HF_ASR_MODEL", "openai/whisper-large-v3")
         language = os.getenv("AUDIO_STT_LANGUAGE", "").strip() or None
         max_chunk_seconds = int(os.getenv("AUDIO_TRANSCRIBE_CHUNK_SECONDS", "480"))
 
