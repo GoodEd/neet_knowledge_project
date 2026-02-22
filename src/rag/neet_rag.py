@@ -9,20 +9,22 @@ from langchain_core.documents import Document
 from ..processors import ContentProcessor
 from .vector_store import VectorStoreManager
 from .llm_manager import LLMManager, RAGPromptBuilder
+from .index_registry import resolve_runtime_index
 
 
 class NEETRAG:
     def __init__(
         self,
-        persist_directory: str = None,
-        embedding_provider: str = "huggingface",
-        embedding_model: str = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+        persist_directory: Optional[str] = None,
+        embedding_provider: Optional[str] = None,
+        embedding_model: Optional[str] = None,
         embedding_dimension: int = 384,
         llm_provider: str = "ollama",
         llm_model: str = "llama3.2",
         llm_base_url: Optional[str] = None,
         chunk_size: Optional[int] = None,
         chunk_overlap: Optional[int] = None,
+        index_name: Optional[str] = None,
     ):
         from src.utils.config import Config
 
@@ -30,14 +32,25 @@ class NEETRAG:
         self.config = config
         self.similarity_threshold = config.similarity_threshold
 
+        embedding_provider = embedding_provider or config.embedding_provider
+        embedding_model = embedding_model or config.embedding_model
+        embedding_provider, embedding_model, resolved_persist_dir = (
+            resolve_runtime_index(
+                embedding_provider=embedding_provider,
+                embedding_model=embedding_model,
+                persist_directory=persist_directory,
+                index_name=index_name,
+                data_dir=os.environ.get("DATA_DIR", "./data"),
+            )
+        )
+
         self.content_processor = ContentProcessor(
             chunk_size=chunk_size or config.chunk_size,
             chunk_overlap=chunk_overlap or config.chunk_overlap,
         )
 
         self.vector_manager = VectorStoreManager(
-            persist_directory=persist_directory
-            or os.path.join(os.environ.get("DATA_DIR", "./data"), "faiss_index"),
+            persist_directory=resolved_persist_dir,
             embedding_provider=embedding_provider,
             embedding_model=embedding_model,
             embedding_dimension=embedding_dimension,
@@ -320,7 +333,7 @@ class NEETRAG:
         return {"answer": answer, "sources": sources, "question": question}
 
     def query_with_history(
-        self, question: str, chat_history: List[tuple] = None, top_k: int = 5
+        self, question: str, chat_history: Optional[List[tuple]] = None, top_k: int = 5
     ) -> Dict[str, Any]:
         if not self._vectorstore_loaded:
             try:

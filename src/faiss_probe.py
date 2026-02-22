@@ -46,15 +46,20 @@ def normalize_text(text: str, preview_chars: int) -> str:
 
 def run_probe(args: argparse.Namespace) -> int:
     from src.rag.llm_manager import RAGPromptBuilder
+    from src.rag.index_registry import resolve_runtime_index
     from src.rag.vector_store import VectorStoreManager
     from src.utils.config import Config
 
     config = Config()
-    persist_dir = args.persist_dir or os.path.join(
-        os.environ.get("DATA_DIR", "./data"), "faiss_index"
-    )
     embedding_provider = args.embedding_provider or config.embedding_provider
     embedding_model = args.embedding_model or config.embedding_model
+    embedding_provider, embedding_model, persist_dir = resolve_runtime_index(
+        embedding_provider=embedding_provider,
+        embedding_model=embedding_model,
+        persist_directory=args.persist_dir,
+        index_name=args.index_name,
+        data_dir=os.environ.get("DATA_DIR", "./data"),
+    )
     threshold = (
         args.similarity_threshold
         if args.similarity_threshold is not None
@@ -80,8 +85,8 @@ def run_probe(args: argparse.Namespace) -> int:
         print("No matches found.")
         return 0
 
-    filtered_docs: List[Document] = []
-    ranked: List[Tuple[Document, float, float]] = []
+    filtered_docs: List[Any] = []
+    ranked: List[Tuple[Any, float, float]] = []
     for doc, score in scored:
         sim = score_to_similarity(score)
         if sim >= threshold:
@@ -162,7 +167,12 @@ def main() -> int:
     parser.add_argument(
         "--persist-dir",
         default=None,
-        help="FAISS index directory (default: $DATA_DIR/faiss_index)",
+        help="FAISS index directory (optional)",
+    )
+    parser.add_argument(
+        "--index-name",
+        default=None,
+        help="Logical index name (used when --persist-dir is not passed)",
     )
     parser.add_argument(
         "--embedding-provider",
