@@ -517,9 +517,9 @@ class YouTubeProcessor:
         self, audio_path: str, video_title: str, track_id: str
     ) -> List[Dict[str, Any]]:
         import base64
+        import subprocess
         import tempfile
         from openai import OpenAI
-        from pydub import AudioSegment
 
         api_key = os.getenv("OPENAI_API_KEY")
         base_url = os.getenv("OPENAI_BASE_URL", "https://openrouter.ai/api/v1")
@@ -549,25 +549,84 @@ class YouTubeProcessor:
         transcript_entries: List[Dict[str, Any]] = []
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            audio = AudioSegment.from_file(audio_path)
-            audio_len_ms = len(audio)
-            chunk_len_ms = max_chunk_seconds * 1000
-            step_ms = step_seconds * 1000
-            overlap_ms = overlap_seconds * 1000
-
             chunk_specs = []
-            start_ms = 0
+
+            duration_seconds = 0.0
+            try:
+                probe = subprocess.run(
+                    [
+                        "ffprobe",
+                        "-v",
+                        "error",
+                        "-show_entries",
+                        "format=duration",
+                        "-of",
+                        "default=noprint_wrappers=1:nokey=1",
+                        audio_path,
+                    ],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                )
+                duration_seconds = float((probe.stdout or "0").strip() or 0.0)
+            except Exception:
+                duration_seconds = 0.0
+
             chunk_index = 0
-            while start_ms < audio_len_ms:
-                end_ms = min(start_ms + chunk_len_ms, audio_len_ms)
-                chunk_audio = audio[start_ms:end_ms]
+
+            if duration_seconds <= 0:
                 chunk_path = os.path.join(tmpdir, f"chunk{chunk_index:03d}.mp3")
-                chunk_audio.export(chunk_path, format="mp3")
-                chunk_specs.append((chunk_path, start_ms / 1000.0, chunk_index))
-                if end_ms >= audio_len_ms:
-                    break
-                start_ms += step_ms
-                chunk_index += 1
+                subprocess.run(
+                    [
+                        "ffmpeg",
+                        "-hide_banner",
+                        "-loglevel",
+                        "error",
+                        "-i",
+                        audio_path,
+                        "-c:a",
+                        "libmp3lame",
+                        "-b:a",
+                        "128k",
+                        "-y",
+                        chunk_path,
+                    ],
+                    check=True,
+                )
+                chunk_specs.append((chunk_path, 0.0, chunk_index))
+            else:
+                start_seconds = 0.0
+                while start_seconds < duration_seconds:
+                    end_seconds = min(
+                        start_seconds + max_chunk_seconds, duration_seconds
+                    )
+                    chunk_path = os.path.join(tmpdir, f"chunk{chunk_index:03d}.mp3")
+                    subprocess.run(
+                        [
+                            "ffmpeg",
+                            "-hide_banner",
+                            "-loglevel",
+                            "error",
+                            "-ss",
+                            str(start_seconds),
+                            "-t",
+                            str(max(0.1, end_seconds - start_seconds)),
+                            "-i",
+                            audio_path,
+                            "-c:a",
+                            "libmp3lame",
+                            "-b:a",
+                            "128k",
+                            "-y",
+                            chunk_path,
+                        ],
+                        check=True,
+                    )
+                    chunk_specs.append((chunk_path, start_seconds, chunk_index))
+                    if end_seconds >= duration_seconds:
+                        break
+                    start_seconds += step_seconds
+                    chunk_index += 1
 
             for chunk_path, chunk_start_seconds, idx in chunk_specs:
                 with open(chunk_path, "rb") as audio_file:
@@ -584,7 +643,7 @@ class YouTubeProcessor:
                     chunk_entries = self._normalize_transcript_entries(
                         segments, video_title, track_id
                     )
-                    if overlap_ms > 0 and idx > 0:
+                    if overlap_seconds > 0 and idx > 0:
                         chunk_entries = [
                             e
                             for e in chunk_entries
