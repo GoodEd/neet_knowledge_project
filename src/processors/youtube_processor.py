@@ -2,6 +2,7 @@ import os
 import re
 import json
 import logging
+from datetime import datetime
 from typing import List, Dict, Optional, Any
 import yt_dlp
 from youtube_transcript_api import YouTubeTranscriptApi
@@ -47,8 +48,6 @@ class YouTubeProcessor:
         Returns:
             Dict[str, Any]: Dictionary containing 'documents', 'source', etc.
         """
-        from datetime import datetime
-
         video_id = self._extract_video_id(url)
         if not video_id:
             raise ValueError(f"Invalid YouTube URL: {url}")
@@ -63,6 +62,7 @@ class YouTubeProcessor:
                 video_title = metadata.get("title", video_title)
 
         transcript_data = []
+        transcript_origin = ""
         error_msg = "No transcript produced"
 
         if s3_audio_uri and s3_transcript_json_uri:
@@ -74,6 +74,13 @@ class YouTubeProcessor:
                     s3_audio_uri=s3_audio_uri,
                     video_title=video_title,
                     track_id=track_id or "s3_audio_asr",
+                )
+                transcript_origin = "s3_audio_forced"
+                self._persist_transcript_snapshot(
+                    transcript_data=transcript_data,
+                    url=url,
+                    video_id=video_id,
+                    origin=transcript_origin,
                 )
                 documents = self._create_documents(transcript_data, url, video_id)
                 return {
@@ -94,6 +101,7 @@ class YouTubeProcessor:
                     video_title,
                     track_id=track_id or "yt_api",
                 )
+                transcript_origin = "youtube_transcript_api"
 
                 if self.youtube_client and video_title != "Unknown Video":
                     for entry in transcript_data:
@@ -101,6 +109,13 @@ class YouTubeProcessor:
 
                 if not transcript_data:
                     raise RuntimeError(f"No transcript available for video: {video_id}")
+
+                self._persist_transcript_snapshot(
+                    transcript_data=transcript_data,
+                    url=url,
+                    video_id=video_id,
+                    origin=transcript_origin,
+                )
 
                 documents = self._create_documents(transcript_data, url, video_id)
 
@@ -124,6 +139,8 @@ class YouTubeProcessor:
                 video_title=video_title,
                 track_id=track_id or "yt_audio_asr",
             )
+            if transcript_data:
+                transcript_origin = "yt_dlp_audio_asr"
         except Exception as e:
             logger.error(f"yt-dlp audio fallback failed: {e}")
 
@@ -134,6 +151,8 @@ class YouTubeProcessor:
                     video_title=video_title,
                     track_id=track_id or "s3_transcript",
                 )
+                if transcript_data:
+                    transcript_origin = "s3_transcript_json"
             except Exception as e:
                 logger.error(f"S3 transcript JSON fallback failed: {e}")
 
@@ -144,13 +163,19 @@ class YouTubeProcessor:
                     video_title=video_title,
                     track_id=track_id or "s3_audio_asr",
                 )
+                if transcript_data:
+                    transcript_origin = "s3_audio_asr"
             except Exception as e:
                 logger.error(f"S3 audio fallback failed: {e}")
 
         if transcript_data:
+            self._persist_transcript_snapshot(
+                transcript_data=transcript_data,
+                url=url,
+                video_id=video_id,
+                origin=transcript_origin or "fallback_unknown",
+            )
             documents = self._create_documents(transcript_data, url, video_id)
-            from datetime import datetime
-
             return {
                 "documents": documents,
                 "source": url,
@@ -160,6 +185,51 @@ class YouTubeProcessor:
             }
 
         raise RuntimeError(f"Failed to fetch transcript: {error_msg}")
+
+    def _persist_transcript_snapshot(
+        self,
+        transcript_data: List[Dict[str, Any]],
+        url: str,
+        video_id: str,
+        origin: str,
+    ) -> Optional[str]:
+        if not transcript_data:
+            return None
+
+        data_dir = os.environ.get("DATA_DIR", "./data")
+        timestamp = datetime.utcnow().strftime("%Y%m%dT%H%M%S_%fZ")
+        safe_origin = re.sub(r"[^A-Za-z0-9_.-]+", "_", origin or "unknown")
+        snapshot_dir = os.path.join(
+            data_dir,
+            "content",
+            "youtube_transcripts",
+            video_id,
+            timestamp,
+        )
+        os.makedirs(snapshot_dir, exist_ok=True)
+
+        payload = {
+            "video_id": video_id,
+            "source": url,
+            "origin": origin,
+            "generated_at": datetime.utcnow().isoformat() + "Z",
+            "segment_count": len(transcript_data),
+            "segments": transcript_data,
+        }
+
+        output_path = os.path.join(snapshot_dir, f"{safe_origin}.json")
+        try:
+            with open(output_path, "w", encoding="utf-8") as f:
+                json.dump(payload, f, ensure_ascii=False, indent=2)
+            logger.info(
+                "Saved transcript snapshot to %s (segments=%s)",
+                output_path,
+                len(transcript_data),
+            )
+            return output_path
+        except Exception as e:
+            logger.warning("Failed to persist transcript snapshot: %s", e)
+            return None
 
     def _load_transcript_from_s3_json(
         self, s3_transcript_json_uri: str, video_title: str, track_id: str
