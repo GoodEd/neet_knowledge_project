@@ -65,36 +65,12 @@ class YouTubeProcessor:
         transcript_origin = ""
         error_msg = "No transcript produced"
 
-        if s3_audio_uri and s3_transcript_json_uri:
-            logger.info(
-                "Both S3 audio and S3 transcript provided; skipping YouTube transcript/download paths and using S3 audio transcription only"
-            )
-            try:
-                transcript_data = self._transcribe_from_s3_audio(
-                    s3_audio_uri=s3_audio_uri,
-                    video_title=video_title,
-                    track_id=track_id or "s3_audio_asr",
-                )
-                transcript_origin = "s3_audio_forced"
-                self._persist_transcript_snapshot(
-                    transcript_data=transcript_data,
-                    url=url,
-                    video_id=video_id,
-                    origin=transcript_origin,
-                )
-                documents = self._create_documents(transcript_data, url, video_id)
-                return {
-                    "documents": documents,
-                    "source": url,
-                    "video_id": video_id,
-                    "total_chunks": len(documents),
-                    "processed_at": datetime.now().isoformat(),
-                }
-            except Exception as e:
-                error_msg = str(e)
-                logger.error(f"S3 audio transcription failed: {e}")
-                raise RuntimeError(f"Failed to fetch transcript: {error_msg}")
-        else:
+        prefer_yt_api = (
+            os.getenv("PREFER_YT_API_FIRST", "true").strip().lower() == "true"
+        )
+        strict_yt_api_only = (track_id or "").startswith("yt_api")
+
+        if prefer_yt_api:
             try:
                 transcript_data = self._get_transcript_with_api(
                     video_id,
@@ -130,6 +106,37 @@ class YouTubeProcessor:
             except Exception as e:
                 error_msg = str(e)
                 logger.error(f"Error processing YouTube video {url}: {error_msg}")
+                if strict_yt_api_only:
+                    raise RuntimeError(f"Failed to fetch transcript: {error_msg}")
+
+        if s3_audio_uri and s3_transcript_json_uri:
+            logger.info(
+                "Both S3 audio and S3 transcript provided; trying S3 audio path after YT API attempt"
+            )
+            try:
+                transcript_data = self._transcribe_from_s3_audio(
+                    s3_audio_uri=s3_audio_uri,
+                    video_title=video_title,
+                    track_id=track_id or "s3_audio_asr",
+                )
+                transcript_origin = "s3_audio_forced"
+                self._persist_transcript_snapshot(
+                    transcript_data=transcript_data,
+                    url=url,
+                    video_id=video_id,
+                    origin=transcript_origin,
+                )
+                documents = self._create_documents(transcript_data, url, video_id)
+                return {
+                    "documents": documents,
+                    "source": url,
+                    "video_id": video_id,
+                    "total_chunks": len(documents),
+                    "processed_at": datetime.now().isoformat(),
+                }
+            except Exception as e:
+                error_msg = str(e)
+                logger.error(f"S3 audio transcription failed: {e}")
 
         logger.info("Falling back to audio/transcript alternatives.")
 
