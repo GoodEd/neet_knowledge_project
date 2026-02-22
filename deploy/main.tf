@@ -674,7 +674,7 @@ resource "aws_cloudwatch_metric_alarm" "worker_sqs_messages_low" {
   metric_name         = "ApproximateNumberOfMessagesVisible"
   statistic           = "Maximum"
   period              = 60
-  evaluation_periods  = 2
+  evaluation_periods  = 10
   threshold           = 0
   comparison_operator = "LessThanOrEqualToThreshold"
   treat_missing_data  = "breaching"
