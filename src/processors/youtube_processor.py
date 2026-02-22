@@ -368,9 +368,7 @@ class YouTubeProcessor:
         with tempfile.TemporaryDirectory() as tmpdir:
             local_path = os.path.join(tmpdir, "audio.mp3")
             self._download_remote_file(s3_audio_uri, local_path)
-            return self._transcribe_audio_file_with_multimodal(
-                local_path, video_title, track_id
-            )
+            return self._transcribe_audio_file(local_path, video_title, track_id)
 
     def _download_remote_file(self, uri: str, local_path: str):
         from urllib.parse import urlparse, unquote
@@ -454,9 +452,343 @@ class YouTubeProcessor:
             if not os.path.exists(final_audio_path):
                 raise RuntimeError("Audio file not found after yt-dlp download")
 
-            return self._transcribe_audio_file_with_multimodal(
-                final_audio_path, video_title, track_id
+            return self._transcribe_audio_file(final_audio_path, video_title, track_id)
+
+    def _transcribe_audio_file(
+        self, audio_path: str, video_title: str, track_id: str
+    ) -> List[Dict[str, Any]]:
+        """Try HF ASR first, then dedicated STT API, then multimodal fallback."""
+        try:
+            return self._transcribe_audio_file_with_hf_asr(
+                audio_path=audio_path,
+                video_title=video_title,
+                track_id=track_id,
             )
+        except Exception as e:
+            logger.warning("HF ASR failed, falling back to dedicated STT: %s", e)
+
+        try:
+            return self._transcribe_audio_file_with_stt_api(
+                audio_path=audio_path,
+                video_title=video_title,
+                track_id=track_id,
+            )
+        except Exception as e:
+            logger.warning(
+                "Dedicated STT failed, falling back to multimodal ASR: %s", e
+            )
+            return self._transcribe_audio_file_with_multimodal(
+                audio_path=audio_path,
+                video_title=video_title,
+                track_id=track_id,
+            )
+
+    def _transcribe_audio_file_with_hf_asr(
+        self, audio_path: str, video_title: str, track_id: str
+    ) -> List[Dict[str, Any]]:
+        import subprocess
+        import tempfile
+        from huggingface_hub import InferenceClient
+
+        hf_token = os.getenv("HF_TOKEN", "").strip()
+        if not hf_token:
+            raise RuntimeError("HF_TOKEN is not set")
+
+        provider = os.getenv("HF_ASR_PROVIDER", "auto")
+        model = os.getenv("HF_ASR_MODEL", "openai/whisper-large-v3:fastest")
+        language = os.getenv("AUDIO_STT_LANGUAGE", "").strip() or None
+        max_chunk_seconds = int(os.getenv("AUDIO_TRANSCRIBE_CHUNK_SECONDS", "480"))
+
+        client = InferenceClient(provider=provider, api_key=hf_token)
+        transcript_entries: List[Dict[str, Any]] = []
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            chunk_pattern = os.path.join(tmpdir, "chunk%03d.mp3")
+            try:
+                subprocess.run(
+                    [
+                        "ffmpeg",
+                        "-hide_banner",
+                        "-loglevel",
+                        "error",
+                        "-i",
+                        audio_path,
+                        "-f",
+                        "segment",
+                        "-segment_time",
+                        str(max_chunk_seconds),
+                        "-c",
+                        "copy",
+                        chunk_pattern,
+                    ],
+                    check=True,
+                )
+                chunk_paths = sorted(
+                    [
+                        os.path.join(tmpdir, p)
+                        for p in os.listdir(tmpdir)
+                        if p.startswith("chunk") and p.endswith(".mp3")
+                    ]
+                )
+            except Exception:
+                chunk_paths = []
+
+            if not chunk_paths:
+                chunk_paths = [audio_path]
+
+            for idx, chunk_path in enumerate(chunk_paths):
+                offset = float(idx * max_chunk_seconds)
+                response = None
+                if language:
+                    try:
+                        response = client.automatic_speech_recognition(
+                            chunk_path,
+                            model=model,
+                            extra_body={
+                                "language": language,
+                                "return_timestamps": True,
+                            },
+                        )
+                    except TypeError:
+                        response = client.automatic_speech_recognition(
+                            chunk_path,
+                            model=model,
+                        )
+                else:
+                    response = client.automatic_speech_recognition(
+                        chunk_path,
+                        model=model,
+                    )
+
+                segments = self._extract_hf_asr_segments(response)
+                if not segments:
+                    continue
+
+                chunk_entries = self._normalize_transcript_entries(
+                    segments,
+                    video_title,
+                    track_id,
+                )
+                for entry in chunk_entries:
+                    entry["start"] = float(entry.get("start", 0.0)) + offset
+                transcript_entries.extend(chunk_entries)
+
+        if not transcript_entries:
+            raise RuntimeError("HF ASR returned no transcript segments")
+
+        if os.getenv("NORMALIZE_TECH_TERMS", "true").lower() == "true":
+            for entry in transcript_entries:
+                entry["text"] = self._normalize_technical_text(entry.get("text", ""))
+
+        logger.info(
+            "HF ASR produced %s segments using model=%s",
+            len(transcript_entries),
+            model,
+        )
+        return transcript_entries
+
+    def _extract_hf_asr_segments(self, response: Any) -> List[Dict[str, Any]]:
+        payload: Any = response
+        if hasattr(response, "model_dump"):
+            payload = response.model_dump()
+        elif hasattr(response, "dict"):
+            payload = response.dict()
+
+        if isinstance(payload, str):
+            text = payload.strip()
+            return [{"text": text, "start": 0.0, "duration": 0.0}] if text else []
+
+        if isinstance(payload, dict):
+            chunks = payload.get("chunks")
+            if isinstance(chunks, list) and chunks:
+                out = []
+                for chunk in chunks:
+                    if not isinstance(chunk, dict):
+                        continue
+                    text = (chunk.get("text") or "").strip()
+                    if not text:
+                        continue
+                    ts = chunk.get("timestamp") or chunk.get("timestamps")
+                    if isinstance(ts, (list, tuple)) and len(ts) >= 2:
+                        start = float(ts[0] or 0.0)
+                        end = float(ts[1] or start)
+                    else:
+                        start = 0.0
+                        end = start
+                    out.append(
+                        {
+                            "text": text,
+                            "start": start,
+                            "duration": max(0.0, end - start),
+                        }
+                    )
+                if out:
+                    return out
+
+            text = (payload.get("text") or "").strip()
+            if text:
+                return [{"text": text, "start": 0.0, "duration": 0.0}]
+
+        text_attr = getattr(response, "text", None)
+        if isinstance(text_attr, str) and text_attr.strip():
+            return [{"text": text_attr.strip(), "start": 0.0, "duration": 0.0}]
+
+        return []
+
+    def _transcribe_audio_file_with_stt_api(
+        self, audio_path: str, video_title: str, track_id: str
+    ) -> List[Dict[str, Any]]:
+        import subprocess
+        import tempfile
+        from openai import OpenAI
+
+        api_key = os.getenv("AUDIO_STT_API_KEY") or os.getenv("OPENAI_API_KEY")
+        base_url = os.getenv("AUDIO_STT_BASE_URL", "https://api.openai.com/v1")
+        model = os.getenv("AUDIO_STT_MODEL", "gpt-4o-mini-transcribe")
+        language = os.getenv("AUDIO_STT_LANGUAGE", "").strip() or None
+        prompt = os.getenv(
+            "AUDIO_STT_PROMPT",
+            "Transcribe verbatim with timestamps. Keep NEET technical terms and formula symbols in English script.",
+        )
+        temperature = float(os.getenv("AUDIO_STT_TEMPERATURE", "0"))
+
+        if not api_key:
+            raise RuntimeError("AUDIO_STT_API_KEY or OPENAI_API_KEY is required")
+
+        if "openrouter.ai" in (base_url or ""):
+            logger.warning(
+                "AUDIO_STT_BASE_URL is OpenRouter; dedicated transcription endpoint may be unavailable."
+            )
+
+        client = OpenAI(api_key=api_key, base_url=base_url)
+        max_chunk_seconds = int(os.getenv("AUDIO_TRANSCRIBE_CHUNK_SECONDS", "480"))
+        transcript_entries: List[Dict[str, Any]] = []
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            chunk_pattern = os.path.join(tmpdir, "chunk%03d.mp3")
+            try:
+                subprocess.run(
+                    [
+                        "ffmpeg",
+                        "-hide_banner",
+                        "-loglevel",
+                        "error",
+                        "-i",
+                        audio_path,
+                        "-f",
+                        "segment",
+                        "-segment_time",
+                        str(max_chunk_seconds),
+                        "-c",
+                        "copy",
+                        chunk_pattern,
+                    ],
+                    check=True,
+                )
+                chunk_paths = sorted(
+                    [
+                        os.path.join(tmpdir, p)
+                        for p in os.listdir(tmpdir)
+                        if p.startswith("chunk") and p.endswith(".mp3")
+                    ]
+                )
+            except Exception:
+                chunk_paths = []
+
+            if not chunk_paths:
+                chunk_paths = [audio_path]
+
+            for idx, chunk_path in enumerate(chunk_paths):
+                offset = float(idx * max_chunk_seconds)
+                segments = self._request_stt_segments(
+                    client=client,
+                    model=model,
+                    audio_path=chunk_path,
+                    language=language,
+                    prompt=prompt,
+                    temperature=temperature,
+                )
+                if not segments:
+                    continue
+                chunk_entries = self._normalize_transcript_entries(
+                    segments,
+                    video_title,
+                    track_id,
+                )
+                for entry in chunk_entries:
+                    entry["start"] = float(entry.get("start", 0.0)) + offset
+                transcript_entries.extend(chunk_entries)
+
+        if not transcript_entries:
+            raise RuntimeError("No transcript segments produced from dedicated STT")
+
+        if os.getenv("NORMALIZE_TECH_TERMS", "true").lower() == "true":
+            for entry in transcript_entries:
+                entry["text"] = self._normalize_technical_text(entry.get("text", ""))
+
+        logger.info(
+            "Dedicated STT produced %s segments using model=%s",
+            len(transcript_entries),
+            model,
+        )
+        return transcript_entries
+
+    def _request_stt_segments(
+        self,
+        client,
+        model: str,
+        audio_path: str,
+        language: Optional[str],
+        prompt: str,
+        temperature: float,
+    ) -> List[Dict[str, Any]]:
+        params = {
+            "model": model,
+            "response_format": "verbose_json",
+            "timestamp_granularities": ["segment"],
+            "temperature": temperature,
+            "prompt": prompt,
+        }
+        if language:
+            params["language"] = language
+
+        with open(audio_path, "rb") as audio_file:
+            response = client.audio.transcriptions.create(file=audio_file, **params)
+
+        payload: Any = response
+        if hasattr(response, "model_dump"):
+            payload = response.model_dump()
+        elif hasattr(response, "dict"):
+            payload = response.dict()
+
+        if isinstance(payload, dict):
+            segments = payload.get("segments")
+            if isinstance(segments, list) and segments:
+                out = []
+                for seg in segments:
+                    if not isinstance(seg, dict):
+                        continue
+                    text = (seg.get("text") or "").strip()
+                    if not text:
+                        continue
+                    start = float(seg.get("start", 0.0) or 0.0)
+                    if "duration" in seg:
+                        duration = float(seg.get("duration", 0.0) or 0.0)
+                    else:
+                        duration = float(seg.get("end", start) or start) - start
+                    out.append({"text": text, "start": start, "duration": duration})
+                if out:
+                    return out
+
+            text = (payload.get("text") or "").strip()
+            if text:
+                return [{"text": text, "start": 0.0, "duration": 0.0}]
+
+        text_attr = getattr(response, "text", None)
+        if isinstance(text_attr, str) and text_attr.strip():
+            return [{"text": text_attr.strip(), "start": 0.0, "duration": 0.0}]
+
+        return []
 
     def _transcribe_audio_file_with_multimodal(
         self, audio_path: str, video_title: str, track_id: str
