@@ -46,3 +46,33 @@ The script picks the first running task for the service and runs:
 ```bash
 aws ecs execute-command --interactive --command /bin/sh
 ```
+
+## 5) Query SQLite inside worker shell
+
+Once in the worker shell:
+
+```bash
+sqlite3 /shared/data/sources.db
+```
+
+Useful commands:
+
+```sql
+.tables
+PRAGMA journal_mode;
+SELECT source_id, source_type, status, updated_at FROM sources ORDER BY updated_at DESC LIMIT 20;
+```
+
+## 6) Probe FAISS snippets for a user phrase
+
+From repo root (local or inside a task with code mounted):
+
+```bash
+./faiss_probe.sh "work done at constant pressure" --top-k 8 --show-prompt
+```
+
+Make shortcut:
+
+```bash
+make faiss-probe QUERY="work done at constant pressure" TOP_K=8
+```
