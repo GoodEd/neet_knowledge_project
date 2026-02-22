@@ -108,7 +108,10 @@ class ContentProcessor:
                 "content": doc.page_content,
                 "source": doc.metadata.get("source", ""),
                 "content_type": doc.metadata.get("source_type", "youtube"),
+                "source_type": doc.metadata.get("source_type", "youtube"),
+                "start_time": doc.metadata.get("start_time", 0),
                 "timestamp": doc.metadata.get("start_time", 0),
+                "track_id": doc.metadata.get("track_id", ""),
                 "title": doc.metadata.get("title", ""),
                 "video_id": doc.metadata.get("video_id", ""),
             }
