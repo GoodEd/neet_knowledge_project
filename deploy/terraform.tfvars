@@ -32,8 +32,8 @@ streamlit_desired_count = 2
 streamlit_min_capacity  = 2
 streamlit_max_capacity  = 10
 
-worker_desired_count = 1
-worker_min_capacity  = 1
+worker_desired_count = 0
+worker_min_capacity  = 0
 worker_max_capacity  = 4
 
 # App config
@@ -45,6 +45,7 @@ openai_api_key_secret_arn           = ""
 worker_openai_api_key_secret_arn    = "arn:aws:secretsmanager:ap-south-1:559387212220:secret:neet-knowledge/openai-api-key-gycOp3"
 streamlit_openai_api_key_secret_arn = "arn:aws:secretsmanager:ap-south-1:559387212220:secret:neet-knowledge/openai-api-key-streamlit-H0r8cB"
 youtube_api_key_secret_arn          = ""
+worker_hf_token_secret_arn          = "arn:aws:secretsmanager:ap-south-1:559387212220:secret:neet-knowledge/hf-token-22z71n"
 
 # Redis
 redis_node_type          = "cache.t3.micro"
