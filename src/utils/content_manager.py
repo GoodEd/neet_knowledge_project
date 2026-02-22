@@ -33,7 +33,6 @@ class ContentSourceManager:
         )
         self.conn.row_factory = sqlite3.Row
         self._init_db()
-        self._migrate_from_json()
 
     def _reconnect(self):
         try:
@@ -62,7 +61,6 @@ class ContentSourceManager:
         )
         self.conn.row_factory = sqlite3.Row
         self._init_db()
-        self._migrate_from_json()
 
     def _with_retry(self, fn):
         last_error = None
@@ -122,46 +120,6 @@ class ContentSourceManager:
                     time.sleep(0.5)
                     continue
                 raise
-
-    def _migrate_from_json(self):
-        row = self.conn.execute("SELECT COUNT(1) AS c FROM sources").fetchone()
-        if row and int(row["c"]) > 0:
-            return
-
-        json_path = os.path.join(os.path.dirname(self.storage_path), "sources.json")
-        if not os.path.exists(json_path):
-            return
-
-        with open(json_path, "r", encoding="utf-8") as f:
-            payload = json.load(f)
-
-        now = datetime.now().isoformat()
-        for source_id, src in payload.items():
-            metadata = src.get("metadata")
-            metadata_json = json.dumps(metadata) if metadata is not None else None
-            self.conn.execute(
-                """
-                INSERT OR REPLACE INTO sources (
-                    source_id, url, source_type, title, last_fetched, last_updated,
-                    fetch_interval_hours, status, error_message, metadata, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    source_id,
-                    src.get("url", ""),
-                    src.get("source_type", ""),
-                    src.get("title"),
-                    src.get("last_fetched"),
-                    src.get("last_updated"),
-                    int(src.get("fetch_interval_hours", 24) or 24),
-                    src.get("status", "pending"),
-                    src.get("error_message"),
-                    metadata_json,
-                    now,
-                    now,
-                ),
-            )
-        self.conn.commit()
 
     def _row_to_source(self, row: sqlite3.Row) -> ContentSource:
         metadata = row["metadata"]
