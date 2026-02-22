@@ -70,6 +70,37 @@ class YouTubeProcessor:
         )
         strict_yt_api_only = (track_id or "").startswith("yt_api")
 
+        if strict_yt_api_only and s3_transcript_json_uri:
+            logger.info(
+                "yt_api track with S3 transcript JSON; using S3 transcript directly before YouTube API"
+            )
+            try:
+                transcript_data = self._load_transcript_from_s3_json(
+                    s3_transcript_json_uri=s3_transcript_json_uri,
+                    video_title=video_title,
+                    track_id=track_id or "yt_api",
+                )
+                transcript_origin = "s3_transcript_json"
+                self._persist_transcript_snapshot(
+                    transcript_data=transcript_data,
+                    url=url,
+                    video_id=video_id,
+                    origin=transcript_origin,
+                )
+                documents = self._create_documents(transcript_data, url, video_id)
+                return {
+                    "documents": documents,
+                    "source": url,
+                    "video_id": video_id,
+                    "total_chunks": len(documents),
+                    "processed_at": datetime.now().isoformat(),
+                }
+            except Exception as e:
+                logger.warning(
+                    "S3 transcript JSON unavailable for yt_api track, trying YouTube API: %s",
+                    e,
+                )
+
         if prefer_yt_api:
             try:
                 transcript_data = self._get_transcript_with_api(
@@ -108,6 +139,9 @@ class YouTubeProcessor:
                 logger.error(f"Error processing YouTube video {url}: {error_msg}")
                 if strict_yt_api_only:
                     raise RuntimeError(f"Failed to fetch transcript: {error_msg}")
+
+        if strict_yt_api_only:
+            raise RuntimeError(f"Failed to fetch transcript: {error_msg}")
 
         if s3_audio_uri and s3_transcript_json_uri:
             logger.info(
