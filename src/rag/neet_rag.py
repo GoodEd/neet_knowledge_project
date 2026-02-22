@@ -3,6 +3,7 @@ from pathlib import Path
 import os
 import re
 import logging
+from collections import defaultdict
 
 from langchain_core.documents import Document
 
@@ -267,17 +268,65 @@ class NEETRAG:
             deduped.append(doc)
         return deduped
 
+    @staticmethod
+    def _doc_group_key(doc: Document) -> tuple:
+        source_type = doc.metadata.get("source_type") or doc.metadata.get(
+            "content_type", ""
+        )
+        if source_type == "youtube":
+            video_id = doc.metadata.get("video_id", "")
+            if not video_id:
+                video_id = NEETRAG._extract_video_id(doc.metadata.get("source", ""))
+            return ("youtube", video_id or doc.metadata.get("source", ""))
+        return (source_type, doc.metadata.get("source", ""))
+
+    def _merge_rerank_docs(self, scored: List[tuple], top_k: int) -> List[Document]:
+        groups: Dict[tuple, List[tuple]] = defaultdict(list)
+        for doc, score in scored:
+            sim = self._score_to_similarity(score)
+            groups[self._doc_group_key(doc)].append((doc, score, sim))
+
+        for key in groups:
+            groups[key].sort(key=lambda x: x[2], reverse=True)
+
+        ranked_groups = sorted(
+            groups.items(),
+            key=lambda item: (
+                item[1][0][2],
+                sum(x[2] for x in item[1][:2]) / min(2, len(item[1])),
+            ),
+            reverse=True,
+        )
+
+        merged: List[Document] = []
+        round_idx = 0
+        while len(merged) < top_k:
+            added_in_round = False
+            for _, docs_in_group in ranked_groups:
+                if round_idx < len(docs_in_group):
+                    merged.append(docs_in_group[round_idx][0])
+                    added_in_round = True
+                    if len(merged) >= top_k:
+                        break
+            if not added_in_round:
+                break
+            round_idx += 1
+
+        return merged
+
     def _retrieve_docs(self, question: str, top_k: int) -> List[Document]:
         fetch_k = max(top_k * 4, top_k)
         scored = self.vector_manager.similarity_search_with_score(question, k=fetch_k)
-        filtered = []
+        filtered_scored = []
         for doc, score in scored:
             sim = self._score_to_similarity(score)
             if sim >= self.similarity_threshold:
-                filtered.append(doc)
-        if not filtered:
-            filtered = [doc for doc, _ in scored[:top_k]]
-        deduped = self._dedupe_docs(filtered)
+                filtered_scored.append((doc, score))
+        if not filtered_scored:
+            filtered_scored = scored[:fetch_k]
+
+        merged = self._merge_rerank_docs(filtered_scored, top_k=top_k)
+        deduped = self._dedupe_docs(merged)
         return deduped[:top_k]
 
     @staticmethod
@@ -288,9 +337,22 @@ class NEETRAG:
         return source_type == "youtube"
 
     def _build_public_sources(self, docs: List[Document]) -> List[Dict[str, Any]]:
-        return [
-            self._build_source_info(doc) for doc in docs if self._is_youtube_doc(doc)
-        ]
+        best_doc_by_video: Dict[str, Document] = {}
+        video_order: List[str] = []
+
+        for doc in docs:
+            if not self._is_youtube_doc(doc):
+                continue
+            video_id = doc.metadata.get("video_id") or self._extract_video_id(
+                doc.metadata.get("source", "")
+            )
+            key = video_id or doc.metadata.get("source", "")
+            if key in best_doc_by_video:
+                continue
+            best_doc_by_video[key] = doc
+            video_order.append(key)
+
+        return [self._build_source_info(best_doc_by_video[k]) for k in video_order]
 
     def query(
         self, question: str, top_k: int = 5, include_sources: bool = True
