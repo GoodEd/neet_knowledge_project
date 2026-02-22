@@ -125,8 +125,10 @@ class VectorStoreManager:
         removed = 0
         for doc in all_docs:
             same_source = doc.metadata.get("source") == source
-            same_track = track_id is None or doc.metadata.get("track_id") == track_id
-            if same_source and same_track:
+            doc_track_id = doc.metadata.get("track_id")
+            same_track = track_id is None or doc_track_id == track_id
+            legacy_trackless_match = track_id is not None and not doc_track_id
+            if same_source and (same_track or legacy_trackless_match):
                 removed += 1
             else:
                 keep_docs.append(doc)

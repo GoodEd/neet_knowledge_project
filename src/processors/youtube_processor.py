@@ -329,12 +329,19 @@ class YouTubeProcessor:
                 else:
                     duration = 0.0
 
+            segment_video_title = (
+                segment.get("video_title")
+                or segment.get("title")
+                or video_title
+                or "Unknown Video"
+            )
+
             entries.append(
                 {
                     "text": text,
                     "start": float(start or 0.0),
                     "duration": float(duration or 0.0),
-                    "video_title": video_title,
+                    "video_title": segment_video_title,
                     "track_id": track_id,
                 }
             )
@@ -1177,6 +1184,8 @@ class YouTubeProcessor:
         video_title = transcript_data[0].get("video_title", "Unknown Video")
 
         i = 0
+        yt_api_chunk_count = 0
+        transliterated_chunk_count = 0
         while i < len(transcript_data):
             chunk_text_parts = []
             chunk_start_time = transcript_data[i]["start"]
@@ -1197,7 +1206,11 @@ class YouTubeProcessor:
             chunk_text = " ".join(chunk_text_parts)
             chunk_track_id = transcript_data[i].get("track_id", "")
             if chunk_track_id.startswith("yt_api"):
+                yt_api_chunk_count += 1
+                original_chunk_text = chunk_text
                 chunk_text = self._build_embedding_text_for_yt_api(chunk_text)
+                if chunk_text != original_chunk_text:
+                    transliterated_chunk_count += 1
             meta = {
                 "source": url,
                 "video_id": video_id,
@@ -1223,6 +1236,14 @@ class YouTubeProcessor:
                 next_i += 1
 
             i = next_i
+
+        if yt_api_chunk_count > 0:
+            logger.info(
+                "Applied yt_api transliteration to %s/%s chunks for video %s",
+                transliterated_chunk_count,
+                yt_api_chunk_count,
+                video_id,
+            )
 
         return documents
 

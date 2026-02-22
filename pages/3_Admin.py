@@ -54,6 +54,10 @@ def true_delete_source(src):
         removed_vectors = rag.vector_manager.delete_by_source(
             src.url, track_id=track_id
         )
+        if track_id == "yt_api":
+            removed_vectors += rag.vector_manager.delete_by_source(
+                src.url, track_id="yt_api_transliterate"
+            )
     except FileNotFoundError:
         removed_vectors = 0
     except Exception as e:
@@ -86,6 +90,30 @@ def enqueue_source(src):
         s3_transcript_json_uri=s3_transcript_uri,
         track_id=src_track_id,
     )
+
+    if src.source_type == "youtube" and src_track_id == "yt_api":
+        companion = source_manager.get_source_by_url_and_track(
+            src.url, "yt_api_transliterate"
+        )
+        if companion:
+            companion_s3_uri = None
+            companion_s3_transcript = None
+            companion_track_id = None
+            if companion.metadata and isinstance(companion.metadata, dict):
+                companion_s3_uri = companion.metadata.get("s3_audio_uri")
+                companion_s3_transcript = companion.metadata.get(
+                    "s3_transcript_json_uri"
+                )
+                companion_track_id = companion.metadata.get("track_id")
+
+            ingestion_queue.submit_job(
+                companion.source_id,
+                companion.url,
+                companion.source_type,
+                s3_audio_uri=companion_s3_uri,
+                s3_transcript_json_uri=companion_s3_transcript,
+                track_id=companion_track_id,
+            )
 
 
 def recreate_source(src):
@@ -139,7 +167,12 @@ with col1:
         source_title = st.text_input("Title (Optional)")
         track_id = st.selectbox(
             "Transcript Track",
-            ["yt_api", "hinglish_asr", "hindi_english_manual"],
+            [
+                "yt_api",
+                "yt_api_transliterate",
+                "hinglish_asr",
+                "hindi_english_manual",
+            ],
             index=0,
         )
         s3_audio_uri = st.text_input("S3 Audio URI (Optional, for YouTube fallback)")
@@ -165,14 +198,9 @@ with col1:
                 metadata=metadata,
             )
             if queue_enabled and ingestion_queue:
-                ingestion_queue.submit_job(
-                    source_id,
-                    source_url,
-                    "youtube",
-                    s3_audio_uri=s3_audio_uri or None,
-                    s3_transcript_json_uri=s3_transcript_json_uri or None,
-                    track_id=track_id or None,
-                )
+                src = source_manager.get_source(source_id)
+                if src:
+                    enqueue_source(src)
                 st.success("YouTube source added to ingestion queue.")
             else:
                 st.warning("Queue is not configured; source saved as pending.")
