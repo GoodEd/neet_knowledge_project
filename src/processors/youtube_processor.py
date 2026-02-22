@@ -174,18 +174,31 @@ class YouTubeProcessor:
                 error_msg = str(e)
                 logger.error(f"S3 audio transcription failed: {e}")
 
+        enable_ytdlp_fallback = (
+            os.getenv("ENABLE_YTDLP_FALLBACK", "false").strip().lower() == "true"
+        )
+        if (
+            not s3_transcript_json_uri
+            and not s3_audio_uri
+            and not enable_ytdlp_fallback
+        ):
+            raise RuntimeError(
+                "Failed to fetch transcript: missing S3 transcript/audio and yt-dlp fallback is disabled"
+            )
+
         logger.info("Falling back to audio/transcript alternatives.")
 
-        try:
-            transcript_data = self._transcribe_from_ytdlp_audio(
-                url=url,
-                video_title=video_title,
-                track_id=backup_track_id,
-            )
-            if transcript_data:
-                transcript_origin = "yt_dlp_audio_asr"
-        except Exception as e:
-            logger.error(f"yt-dlp audio fallback failed: {e}")
+        if enable_ytdlp_fallback:
+            try:
+                transcript_data = self._transcribe_from_ytdlp_audio(
+                    url=url,
+                    video_title=video_title,
+                    track_id=backup_track_id,
+                )
+                if transcript_data:
+                    transcript_origin = "yt_dlp_audio_asr"
+            except Exception as e:
+                logger.error(f"yt-dlp audio fallback failed: {e}")
 
         if not transcript_data and s3_transcript_json_uri:
             try:
