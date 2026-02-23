@@ -629,7 +629,7 @@ class YouTubeProcessor:
             "[00:05] r cancels out with r, and this becomes the square of 1 / 3. "
             "Return ONLY the timestamped lines. No other text."
         )
-        user_prompt = "Translate this audio to pure English text. Output only timestamped lines."
+        user_prompt = "Listen to this audio and TRANSLATE it entirely to English. Do NOT transcribe the original Hindi words. You MUST translate the meaning into English. ABSOLUTELY NO DEVANAGARI SCRIPT ALLOWED. Output MUST be timestamped lines only."
 
         max_chunk_seconds = int(os.getenv("AUDIO_TRANSCRIBE_CHUNK_SECONDS", "40"))
         overlap_seconds = int(os.getenv("AUDIO_TRANSCRIBE_CHUNK_OVERLAP_SECONDS", "10"))
