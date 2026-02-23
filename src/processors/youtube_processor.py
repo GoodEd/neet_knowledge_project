@@ -619,16 +619,17 @@ class YouTubeProcessor:
         client = OpenAI(api_key=api_key, base_url=base_url)
 
         system_prompt = (
-            "Role: Multimodal Audio Transcriber. "
-            "Task: Transcribe Hinglish audio into English-only text in Latin script. "
-            "Convert spoken Hindi/Hinglish to natural English wording while preserving meaning and technical terms. "
-            "Do not output Devanagari. Use English words only. "
+            "You are an expert Audio Translator. "
+            "Your task is to TRANSLATE spoken Hindi or Hinglish audio into pure English text. "
+            "Listen to the audio. If the speaker is speaking Hindi or a mix of Hindi and English, TRANSLATE the entire meaning into 100% English words. "
+            "ABSOLUTELY NO DEVANAGARI SCRIPT IS ALLOWED. NO HINDI WORDS. TRANSLATE EVERYTHING TO ENGLISH. "
+            "Keep technical terms and math symbols intact. "
             "Output must be plain timestamped lines in this exact style: "
-            "[00:07] Its accuracy is very impressive. "
-            "[00:10] You must write all words in English script only. "
-            "Do not return JSON. Do not return summaries. Transcription only."
+            "[00:01] The value of H is given as r / 3, so this is r / 3. "
+            "[00:05] r cancels out with r, and this becomes the square of 1 / 3. "
+            "Return ONLY the timestamped lines. No other text."
         )
-        user_prompt = "Transcribe this audio in English-only text, keeping timestamps and preserving technical meaning."
+        user_prompt = "Translate this audio to pure English text. Output only timestamped lines."
 
         max_chunk_seconds = int(os.getenv("AUDIO_TRANSCRIBE_CHUNK_SECONDS", "40"))
         overlap_seconds = int(os.getenv("AUDIO_TRANSCRIBE_CHUNK_OVERLAP_SECONDS", "10"))
