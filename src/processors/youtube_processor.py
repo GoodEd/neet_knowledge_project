@@ -786,10 +786,28 @@ class YouTubeProcessor:
         user_prompt: str,
         encoded_audio: str,
     ) -> List[Dict[str, Any]]:
-        file_url = f"data:audio/mp3;base64,{encoded_audio}"
-        response = client.chat.completions.create(
-            model=model,
-            messages=[
+        response = None
+        input_audio_messages = [
+            {"role": "system", "content": system_prompt},
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": user_prompt},
+                    {
+                        "type": "input_audio",
+                        "input_audio": {"data": encoded_audio, "format": "mp3"},
+                    },
+                ],
+            },
+        ]
+        try:
+            response = client.chat.completions.create(
+                model=model,
+                messages=input_audio_messages,
+            )
+        except Exception as first_err:
+            file_url = f"data:audio/mp3;base64,{encoded_audio}"
+            file_messages = [
                 {"role": "system", "content": system_prompt},
                 {
                     "role": "user",
@@ -798,8 +816,19 @@ class YouTubeProcessor:
                         {"type": "file", "file_url": file_url},
                     ],
                 },
-            ],
-        )
+            ]
+            try:
+                response = client.chat.completions.create(
+                    model=model,
+                    messages=file_messages,
+                )
+            except Exception as second_err:
+                logger.error(
+                    "OpenRouter transcription request failed for both input_audio and file payloads. input_audio_error=%s file_error=%s",
+                    first_err,
+                    second_err,
+                )
+                raise
 
         content = response.choices[0].message.content
         if not content:
