@@ -620,14 +620,15 @@ class YouTubeProcessor:
 
         system_prompt = (
             "Role: Multimodal Audio Transcriber. "
-            "Task: Transcribe audio into short Hinglish sentences using Hindi in Devanagari and English in Latin script. "
-            "Use only Hindi and English words. "
+            "Task: Transcribe Hinglish audio into English-only text in Latin script. "
+            "Convert spoken Hindi/Hinglish to natural English wording while preserving meaning and technical terms. "
+            "Do not output Devanagari. Use English words only. "
             "Output must be plain timestamped lines in this exact style: "
-            "[00:07] इसकी accuracy बहुत impressive है। "
-            "[00:10] आपको English words को Latin script में ही लिखना है। "
+            "[00:07] Its accuracy is very impressive. "
+            "[00:10] You must write all words in English script only. "
             "Do not return JSON. Do not return summaries. Transcription only."
         )
-        user_prompt = "Transcribe this audio following the system rules and output timestamped lines only."
+        user_prompt = "Transcribe this audio in English-only text, keeping timestamps and preserving technical meaning."
 
         max_chunk_seconds = int(os.getenv("AUDIO_TRANSCRIBE_CHUNK_SECONDS", "40"))
         overlap_seconds = int(os.getenv("AUDIO_TRANSCRIBE_CHUNK_OVERLAP_SECONDS", "10"))
