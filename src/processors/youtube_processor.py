@@ -91,6 +91,14 @@ class YouTubeProcessor:
                     origin=transcript_origin,
                 )
                 documents = self._create_documents(transcript_data, url, video_id)
+                documents = self._maybe_add_backup_transcript_docs(
+                    documents=documents,
+                    url=url,
+                    video_id=video_id,
+                    video_title=video_title,
+                    track_id=track_id,
+                    s3_audio_uri=s3_audio_uri,
+                )
                 return {
                     "documents": documents,
                     "source": url,
@@ -128,6 +136,14 @@ class YouTubeProcessor:
                 )
 
                 documents = self._create_documents(transcript_data, url, video_id)
+                documents = self._maybe_add_backup_transcript_docs(
+                    documents=documents,
+                    url=url,
+                    video_id=video_id,
+                    video_title=video_title,
+                    track_id=track_id,
+                    s3_audio_uri=s3_audio_uri,
+                )
 
                 return {
                     "documents": documents,
@@ -163,6 +179,14 @@ class YouTubeProcessor:
                     origin=transcript_origin,
                 )
                 documents = self._create_documents(transcript_data, url, video_id)
+                documents = self._maybe_add_backup_transcript_docs(
+                    documents=documents,
+                    url=url,
+                    video_id=video_id,
+                    video_title=video_title,
+                    track_id=track_id,
+                    s3_audio_uri=s3_audio_uri,
+                )
                 return {
                     "documents": documents,
                     "source": url,
@@ -232,6 +256,14 @@ class YouTubeProcessor:
                 origin=transcript_origin or "fallback_unknown",
             )
             documents = self._create_documents(transcript_data, url, video_id)
+            documents = self._maybe_add_backup_transcript_docs(
+                documents=documents,
+                url=url,
+                video_id=video_id,
+                video_title=video_title,
+                track_id=track_id,
+                s3_audio_uri=s3_audio_uri,
+            )
             return {
                 "documents": documents,
                 "source": url,
@@ -241,6 +273,49 @@ class YouTubeProcessor:
             }
 
         raise RuntimeError(f"Failed to fetch transcript: {error_msg}")
+
+    def _maybe_add_backup_transcript_docs(
+        self,
+        documents: List[Document],
+        url: str,
+        video_id: str,
+        video_title: str,
+        track_id: Optional[str],
+        s3_audio_uri: Optional[str],
+    ) -> List[Document]:
+        if not (track_id or "").startswith("yt_api"):
+            return documents
+
+        backup_entries: List[Dict[str, Any]] = []
+        try:
+            if s3_audio_uri:
+                backup_entries = self._transcribe_from_s3_audio(
+                    s3_audio_uri=s3_audio_uri,
+                    video_title=video_title,
+                    track_id="backup_transcript",
+                )
+            elif os.getenv("ENABLE_YTDLP_FALLBACK", "false").strip().lower() == "true":
+                backup_entries = self._transcribe_from_ytdlp_audio(
+                    url=url,
+                    video_title=video_title,
+                    track_id="backup_transcript",
+                )
+        except Exception as e:
+            logger.warning("Backup transcript generation failed: %s", e)
+            return documents
+
+        if not backup_entries:
+            return documents
+
+        self._persist_transcript_snapshot(
+            transcript_data=backup_entries,
+            url=url,
+            video_id=video_id,
+            origin="backup_transcript",
+        )
+        backup_docs = self._create_documents(backup_entries, url, video_id)
+        logger.info("Added backup transcript docs: %s", len(backup_docs))
+        return documents + backup_docs
 
     def _persist_transcript_snapshot(
         self,
