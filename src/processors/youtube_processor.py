@@ -629,7 +629,7 @@ class YouTubeProcessor:
             "[00:05] r cancels out with r, and this becomes the square of 1 / 3. "
             "Return ONLY the timestamped lines. No other text."
         )
-        user_prompt = "Listen to this audio and TRANSLATE it entirely to English. Do NOT transcribe the original Hindi words. You MUST translate the meaning into English. ABSOLUTELY NO DEVANAGARI SCRIPT ALLOWED. Output MUST be timestamped lines only."
+        user_prompt = f"The context of this audio is: {video_title}. Please use appropriate terminology. Listen to this audio and TRANSLATE it entirely to English. Do NOT transcribe the original Hindi words. You MUST translate the meaning into English. ABSOLUTELY NO DEVANAGARI SCRIPT ALLOWED. Output MUST be timestamped lines only."
 
         max_chunk_seconds = int(os.getenv("AUDIO_TRANSCRIBE_CHUNK_SECONDS", "40"))
         overlap_seconds = int(os.getenv("AUDIO_TRANSCRIBE_CHUNK_OVERLAP_SECONDS", "10"))
@@ -806,6 +806,7 @@ class YouTubeProcessor:
             response = client.chat.completions.create(
                 model=model,
                 messages=input_audio_messages,
+                temperature=0.2,
             )
         except Exception as first_err:
             file_url = f"data:audio/mp3;base64,{encoded_audio}"
@@ -823,6 +824,7 @@ class YouTubeProcessor:
                 response = client.chat.completions.create(
                     model=model,
                     messages=file_messages,
+                    temperature=0.2,
                 )
             except Exception as second_err:
                 logger.error(
