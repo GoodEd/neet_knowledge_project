@@ -109,8 +109,8 @@ def main():
                     new_metadata["s3_transcript_json_uri"] = s3_transcript_json_uri
                 if track_id:
                     new_metadata["track_id"] = track_id
-                if video_title:
-                    new_metadata["video_title"] = video_title
+                # if video_title:
+                #     new_metadata["video_title"] = video_title
                     
                 # We do a direct DB insertion so we don't accidentally re-hash the source_id
                 from datetime import datetime
