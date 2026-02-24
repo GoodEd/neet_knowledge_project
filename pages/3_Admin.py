@@ -137,24 +137,24 @@ col1, col2 = st.columns([1, 2])
 
 with col1:
     st.header("Add New Source")
-    with st.form("add_source_form"):
-        source_url = st.text_input("YouTube URL or PDF Path")
-        source_title = st.text_input("Title (Optional)")
-        track_id = st.selectbox(
-            "Transcript Track",
-            ["yt_api", "hinglish_asr", "hindi_english_manual"],
-            index=0,
-        )
-        s3_audio_uri = st.text_input("S3 Audio URI (Optional, for YouTube fallback)")
-        s3_transcript_json_uri = st.text_input("S3 Transcript JSON URI (Optional)")
-
-        c1, c2 = st.columns(2)
-        submit_yt = c1.form_submit_button("Add YouTube")
-        submit_pdf = c2.form_submit_button("Add PDF")
-
-        if submit_yt and source_url:
-            metadata = None
-            if s3_audio_uri or s3_transcript_json_uri or track_id:
+    
+    tab1, tab2 = st.tabs(["Add YouTube", "Upload File (PDF/CSV)"])
+    
+    with tab1:
+        with st.form("add_youtube_form"):
+            source_url = st.text_input("YouTube URL")
+            source_title = st.text_input("Video Title (Optional)")
+            track_id = st.selectbox(
+                "Transcript Track",
+                ["yt_api", "hinglish_asr", "hindi_english_manual"],
+                index=0,
+            )
+            s3_audio_uri = st.text_input("S3 Audio URI (Optional)")
+            s3_transcript_json_uri = st.text_input("S3 Transcript JSON URI (Optional)")
+            
+            submit_yt = st.form_submit_button("Add YouTube", type="primary")
+            
+            if submit_yt and source_url:
                 metadata = {}
                 if track_id:
                     metadata["track_id"] = track_id
@@ -162,26 +162,72 @@ with col1:
                     metadata["s3_audio_uri"] = s3_audio_uri
                 if s3_transcript_json_uri:
                     metadata["s3_transcript_json_uri"] = s3_transcript_json_uri
-            source_id = source_manager.add_youtube(
-                source_url,
-                source_title or None,
-                metadata=metadata,
-            )
-            if queue_enabled and ingestion_queue:
-                src = source_manager.get_source(source_id)
-                if src:
-                    enqueue_source(src)
-                st.success("YouTube source added to ingestion queue.")
-            else:
-                st.warning("Queue is not configured; source saved as pending.")
-
-        if submit_pdf and source_url:
-            source_id = source_manager.add_pdf(source_url, source_title or None)
-            if queue_enabled and ingestion_queue:
-                ingestion_queue.submit_job(source_id, source_url, "pdf")
-                st.success("PDF source added to ingestion queue.")
-            else:
-                st.warning("Queue is not configured; source saved as pending.")
+                
+                source_id = source_manager.add_youtube(
+                    source_url,
+                    source_title or None,
+                    metadata=metadata if metadata else None,
+                )
+                if queue_enabled and ingestion_queue:
+                    src = source_manager.get_source(source_id)
+                    if src:
+                        enqueue_source(src)
+                    st.success("YouTube source added to ingestion queue.")
+                else:
+                    st.warning("Queue is not configured; source saved as pending.")
+                    
+    with tab2:
+        with st.form("upload_file_form"):
+            uploaded_file = st.file_uploader("Upload PDF or CSV from your computer", type=["pdf", "csv"])
+            file_title = st.text_input("Title (Optional)")
+            
+            # Show all fields as requested by user
+            st.markdown("**(Optional) Remote Overrides**")
+            file_track_id = st.text_input("Track ID Override")
+            file_s3_audio_uri = st.text_input("S3 Audio URI Override")
+            file_s3_transcript_json_uri = st.text_input("S3 Transcript JSON URI Override")
+            
+            submit_file = st.form_submit_button("Upload and Ingest", type="primary")
+            
+            if submit_file and uploaded_file:
+                import tempfile
+                import shutil
+                
+                # Save locally to shared EFS so worker can see it
+                uploads_dir = "/shared/data/uploads"
+                os.makedirs(uploads_dir, exist_ok=True)
+                
+                safe_filename = uploaded_file.name.replace(" ", "_")
+                file_path = os.path.join(uploads_dir, safe_filename)
+                
+                with open(file_path, "wb") as f:
+                    f.write(uploaded_file.getbuffer())
+                
+                metadata = {}
+                if file_track_id: metadata["track_id"] = file_track_id
+                if file_s3_audio_uri: metadata["s3_audio_uri"] = file_s3_audio_uri
+                if file_s3_transcript_json_uri: metadata["s3_transcript_json_uri"] = file_s3_transcript_json_uri
+                
+                source_type = "pdf" if safe_filename.lower().endswith(".pdf") else "csv"
+                
+                if source_type == "pdf":
+                    source_id = source_manager.add_pdf(file_path, file_title or None, metadata=metadata if metadata else None)
+                else:
+                    source_id = source_manager.add_csv(file_path, file_title or None, metadata=metadata if metadata else None)
+                    
+                if queue_enabled and ingestion_queue:
+                    # Enqueue using the physical filepath on the shared EFS
+                    ingestion_queue.submit_job(
+                        source_id=source_id,
+                        url=file_path,
+                        source_type=source_type,
+                        s3_audio_uri=file_s3_audio_uri or None,
+                        s3_transcript_json_uri=file_s3_transcript_json_uri or None,
+                        track_id=file_track_id or None
+                    )
+                    st.success(f"{source_type.upper()} file uploaded and added to ingestion queue.")
+                else:
+                    st.warning("Queue is not configured; source saved as pending.")
 
     st.divider()
 

@@ -20,8 +20,14 @@ def main():
         print(f"Error: File not found: {args.file_path}")
         sys.exit(1)
 
+    import re
     filename = os.path.basename(args.file_path)
     video_id = filename.split('_')[0]
+    
+    title_part = filename[len(video_id)+1:]
+    title_part = re.sub(r'_\d{4}-\d{2}-\d{2}_[a-z]{2}\.json$', '', title_part)
+    title_part = title_part.replace('_', ' ')
+    video_title = title_part or "YouTube Video"
 
     if len(video_id) != 11:
         print(f"Warning: Extracted video ID '{video_id}' is not 11 characters long. Are you sure the filename is correct?")
@@ -45,10 +51,15 @@ def main():
     try:
         q = IngestionQueue(queue_url="https://sqs.ap-south-1.amazonaws.com/559387212220/neet-knowledge-dev-ingestion")
         # We pass s3_audio_uri=None intentionally here
+        import hashlib
+        hash_input = f"https://www.youtube.com/watch?v={video_id}"
+        source_id = hashlib.md5(hash_input.encode()).hexdigest()[:12]
+        
         resp = q.submit_job(
-            source_id=str(uuid.uuid4())[:12],
+            source_id=source_id,
             url=f"https://www.youtube.com/watch?v={video_id}",
             source_type="youtube",
+            video_title=video_title,
             s3_transcript_json_uri=http_uri,
             s3_audio_uri=None,
             track_id="yt_api"
