@@ -286,6 +286,10 @@ class YouTubeProcessor:
         if not (track_id or "").startswith("yt_api"):
             return documents
 
+        if not s3_audio_uri:
+            logger.info("No s3_audio_uri provided. Skipping backup transcript generation completely.")
+            return documents
+
         backup_entries: List[Dict[str, Any]] = []
         try:
             if s3_audio_uri:
