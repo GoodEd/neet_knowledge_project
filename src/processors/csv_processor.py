@@ -65,15 +65,44 @@ class CSVProcessor:
         """
         Process a CSV file containing HTML question and explanation pairs.
         """
-        if not os.path.exists(file_path):
+        import tempfile
+        import boto3
+        from urllib.parse import urlparse
+        import requests
+
+        is_s3 = file_path.startswith("s3://")
+        is_http = file_path.startswith("http://") or file_path.startswith("https://")
+        
+        if not is_s3 and not is_http and not os.path.exists(file_path):
             raise FileNotFoundError(f"CSV file not found: {file_path}")
 
+        tmp_file = None
         try:
-            # Read CSV (trying different encodings if utf-8 fails)
+            if is_s3 or is_http:
+                tmp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".csv")
+                local_path = tmp_file.name
+                
+                if is_s3:
+                    parsed = urlparse(file_path)
+                    bucket = parsed.netloc
+                    key = parsed.path.lstrip('/')
+                    s3 = boto3.client('s3')
+                    s3.download_file(bucket, key, local_path)
+                else:
+                    response = requests.get(file_path)
+                    response.raise_for_status()
+                    with open(local_path, "wb") as f:
+                        f.write(response.content)
+                
+                process_path = local_path
+            else:
+                process_path = file_path
+
+            # Read CSV
             try:
-                df = pd.read_csv(file_path, encoding='utf-8')
+                df = pd.read_csv(process_path, encoding='utf-8')
             except UnicodeDecodeError:
-                df = pd.read_csv(file_path, encoding='latin1')
+                df = pd.read_csv(process_path, encoding='latin1')
                 
             columns = list(df.columns)
             q_col = self._find_column(columns, self.question_col_hints)
@@ -86,22 +115,21 @@ class CSVProcessor:
                 
             documents = []
             
-            # For each row, create a structured Q&A document
             for idx, row in df.iterrows():
                 raw_q = row[q_col]
                 raw_e = row[e_col]
                 
-                # Skip if both are empty
                 if pd.isna(raw_q) and pd.isna(raw_e):
                     continue
                     
                 clean_q = self._html_to_markdown(raw_q)
                 clean_e = self._html_to_markdown(raw_e)
                 
-                # Format into a structured combined chunk for maximum retrieval fidelity
-                # Note: Later we can upgrade this to actual MultiVector (return Q as page_content, E in metadata)
-                # But for standard Langchain ingestion right now, a highly structured combined chunk works best.
-                combined_content = f"Question:\n{clean_q}\n\nOfficial Solution/Explanation:\n{clean_e}"
+                combined_content = f"Question:
+{clean_q}
+
+Official Solution/Explanation:
+{clean_e}"
                 
                 documents.append({
                     "content": combined_content,
@@ -111,6 +139,12 @@ class CSVProcessor:
                     "timestamp": datetime.now().isoformat()
                 })
                 
+            if tmp_file:
+                try:
+                    os.unlink(tmp_file.name)
+                except:
+                    pass
+
             return {
                 "documents": documents,
                 "source": os.path.basename(file_path),
@@ -119,5 +153,10 @@ class CSVProcessor:
             }
             
         except Exception as e:
+            if tmp_file:
+                try:
+                    os.unlink(tmp_file.name)
+                except:
+                    pass
             logger.exception("Failed to process CSV")
             raise RuntimeError(f"Error processing CSV {file_path}: {str(e)}")
