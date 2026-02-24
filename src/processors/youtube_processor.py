@@ -534,6 +534,8 @@ class YouTubeProcessor:
             parsed = urlparse(uri)
             host = parsed.netloc
             path = parsed.path.lstrip("/")
+            if parsed.fragment:
+                path = f"{path}#{parsed.fragment}"
 
             # Handle S3 virtual-hosted style and path-style URLs via IAM auth
             vh_match = re.match(r"^([^.]+)\.s3[.-][^.]+\.amazonaws\.com$", host)
