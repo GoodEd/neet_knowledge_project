@@ -59,7 +59,6 @@ def main():
             source_id=source_id,
             url=f"https://www.youtube.com/watch?v={video_id}",
             source_type="youtube",
-            video_title=video_title,
             s3_transcript_json_uri=http_uri,
             s3_audio_uri=None,
             track_id="yt_api"
