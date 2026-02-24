@@ -37,7 +37,7 @@ def main():
     print(f"Queueing CSV ingestion...")
     
     try:
-        q = IngestionQueue()
+        q = IngestionQueue(queue_url="https://sqs.ap-south-1.amazonaws.com/559387212220/neet-knowledge-dev-ingestion")
         resp = q.submit_job(
             source_id=str(uuid.uuid4())[:12],
             url=http_uri,

@@ -43,7 +43,7 @@ def main():
     print(f"Queueing ingestion for video: {video_id}")
     
     try:
-        q = IngestionQueue()
+        q = IngestionQueue(queue_url="https://sqs.ap-south-1.amazonaws.com/559387212220/neet-knowledge-dev-ingestion")
         # We pass s3_audio_uri=None intentionally here
         resp = q.submit_job(
             source_id=str(uuid.uuid4())[:12],
