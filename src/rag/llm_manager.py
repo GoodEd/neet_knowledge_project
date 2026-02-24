@@ -117,10 +117,16 @@ Please provide a helpful answer based on the context above."""
                 source_type = getattr(doc, "metadata", {}).get(
                     "source_type"
                 ) or getattr(doc, "metadata", {}).get("content_type")
-                if source_type != "youtube":
-                    continue
-                if source not in sources:
-                    sources.append(source)
+                if source_type == "youtube":
+                    title = getattr(doc, "metadata", {}).get("title", "")
+                    start_time = getattr(doc, "metadata", {}).get("start_time", 0)
+                    if title:
+                        source_label = f"{title} (Time: {start_time}s)"
+                    else:
+                        source_label = source
+                        
+                    if source_label not in sources:
+                        sources.append(source_label)
             if sources:
                 prompt += f"\n\nSources: {', '.join(sources)}"
 
