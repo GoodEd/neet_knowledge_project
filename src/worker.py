@@ -124,7 +124,7 @@ def main():
                         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         ''',
                         (
-                            source_id, source, source_type, video_title or source,
+                            source_id, source, source_type, source,
                             datetime.now().isoformat(), datetime.now().isoformat(),
                             24, 'active', None, json.dumps(new_metadata) if new_metadata else None,
                             datetime.now().isoformat(), datetime.now().isoformat()
