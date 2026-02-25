@@ -55,9 +55,58 @@ class LLMManager:
         else:
             raise ValueError(f"Unsupported LLM provider: {self.provider}")
 
-    def generate(self, prompt: str) -> str:
+    def _openrouter_tracking_kwargs(
+        self, session_id: Optional[str] = None, user_id: Optional[str] = None
+    ) -> Dict[str, Any]:
+        kwargs: Dict[str, Any] = {}
+        headers: Dict[str, str] = {}
+
+        if session_id:
+            sid = str(session_id)[:128]
+            kwargs["session_id"] = sid
+            headers["x-session-id"] = sid
+
+        if user_id:
+            uid = str(user_id)[:128]
+            kwargs["user"] = uid
+            headers["x-user-id"] = uid
+
+        if headers:
+            kwargs["extra_headers"] = headers
+
+        return kwargs
+
+    def generate(
+        self,
+        prompt: str,
+        session_id: Optional[str] = None,
+        user_id: Optional[str] = None,
+    ) -> str:
         if self.llm is None:
             raise ValueError("LLM not initialized")
+
+        if self.provider in {"openai", "openrouter"}:
+            from openai import OpenAI
+
+            api_key = os.getenv("OPENAI_API_KEY")
+            base_url = os.getenv("OPENAI_BASE_URL")
+            if not api_key:
+                raise ValueError("OPENAI_API_KEY is required")
+
+            client = OpenAI(api_key=api_key, base_url=base_url)
+            kwargs = self._openrouter_tracking_kwargs(
+                session_id=session_id, user_id=user_id
+            )
+            response = client.chat.completions.create(
+                model=self.model,
+                temperature=0.7,
+                messages=[{"role": "user", "content": prompt}],
+                **kwargs,
+            )
+            content = response.choices[0].message.content
+            if isinstance(content, str):
+                return content
+            return str(content)
 
         response = self.llm.invoke(prompt)
         if hasattr(response, "content"):
@@ -65,7 +114,12 @@ class LLMManager:
         return str(response)
 
     def extract_image_context(
-        self, image_bytes: bytes, filename: str = "image.png", user_hint: str = ""
+        self,
+        image_bytes: bytes,
+        filename: str = "image.png",
+        user_hint: str = "",
+        session_id: Optional[str] = None,
+        user_id: Optional[str] = None,
     ) -> str:
         if self.provider not in {"openai", "openrouter"}:
             raise ValueError(
@@ -105,6 +159,9 @@ class LLMManager:
         )
 
         client = OpenAI(api_key=api_key, base_url=base_url)
+        kwargs = self._openrouter_tracking_kwargs(
+            session_id=session_id, user_id=user_id
+        )
         response = client.chat.completions.create(
             model=vision_model,
             temperature=0.2,
@@ -118,6 +175,7 @@ class LLMManager:
                     ],
                 },
             ],
+            **kwargs,
         )
 
         content = response.choices[0].message.content
@@ -204,7 +262,7 @@ Please provide a helpful answer based on the context above."""
 
         if chat_history:
             history_parts = []
-            for human, ai in chat_history[-3:]:
+            for human, ai in chat_history:
                 history_parts.append(f"User: {human}\nAssistant: {ai}")
 
             prompt = (

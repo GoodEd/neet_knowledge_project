@@ -427,6 +427,7 @@ resource "aws_ecs_task_definition" "streamlit" {
         { name = "DATA_DIR", value = "/shared/data" },
         { name = "REDIS_URL", value = local.redis_url },
         { name = "SQS_QUEUE_URL", value = aws_sqs_queue.ingestion.url },
+        { name = "CHAT_HISTORY_TURNS", value = tostring(var.chat_history_turns) },
         { name = "ADMIN_PASSWORD", value = var.admin_password }
       ], local.streamlit_openai_plain_env)
 

@@ -37,8 +37,9 @@ worker_min_capacity  = 0
 worker_max_capacity  = 1
 
 # App config
-openai_base_url   = "https://openrouter.ai/api/v1"
-openai_model_name = "google/gemini-2.0-flash-001"
+openai_base_url    = "https://openrouter.ai/api/v1"
+openai_model_name  = "google/gemini-2.0-flash-001"
+chat_history_turns = 4
 
 # Secrets (recommended: keep these in Secrets Manager)
 openai_api_key_secret_arn           = ""

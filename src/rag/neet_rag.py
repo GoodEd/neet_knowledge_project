@@ -363,7 +363,12 @@ class NEETRAG:
         return [self._build_source_info(doc) for doc in selected_docs]
 
     def query(
-        self, question: str, top_k: int = 5, include_sources: bool = True
+        self,
+        question: str,
+        top_k: int = 5,
+        include_sources: bool = True,
+        session_id: Optional[str] = None,
+        user_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         if not self._vectorstore_loaded:
             try:
@@ -394,7 +399,9 @@ class NEETRAG:
         self.logger.info("LLM prompt payload: %s", prompt)
 
         try:
-            answer = self.llm_manager.generate(prompt)
+            answer = self.llm_manager.generate(
+                prompt, session_id=session_id, user_id=user_id
+            )
         except Exception as e:
             answer = f"Error generating answer: {str(e)}"
 
@@ -403,7 +410,12 @@ class NEETRAG:
         return {"answer": answer, "sources": sources, "question": question}
 
     def query_with_history(
-        self, question: str, chat_history: Optional[List[tuple]] = None, top_k: int = 5
+        self,
+        question: str,
+        chat_history: Optional[List[tuple]] = None,
+        top_k: int = 5,
+        session_id: Optional[str] = None,
+        user_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         if not self._vectorstore_loaded:
             try:
@@ -424,7 +436,9 @@ class NEETRAG:
         self.logger.info("LLM prompt payload with history: %s", prompt)
 
         try:
-            answer = self.llm_manager.generate(prompt)
+            answer = self.llm_manager.generate(
+                prompt, session_id=session_id, user_id=user_id
+            )
         except Exception as e:
             answer = f"Error generating answer: {str(e)}"
 

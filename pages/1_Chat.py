@@ -28,6 +28,11 @@ st.set_page_config(page_title="NEET Chat", layout="wide")
 
 hide_admin_and_toolbar()
 
+try:
+    CHAT_HISTORY_TURNS = max(0, int(os.getenv("CHAT_HISTORY_TURNS", "4")))
+except Exception:
+    CHAT_HISTORY_TURNS = 4
+
 
 # --- Redis Session Management ---
 def get_redis_client():
@@ -152,6 +157,8 @@ with st.sidebar:
                     extracted = rag.llm_manager.extract_image_context(
                         image_bytes=image_bytes,
                         filename=uploaded_image.name,
+                        session_id=session_id,
+                        user_id=session_id,
                     )
                 st.session_state.image_context_text = extracted
                 st.session_state.image_context_hash = image_hash
@@ -222,7 +229,28 @@ if prompt := st.chat_input("Ask a question about NEET 2025..."):
                         "Image context from uploaded question image:\n"
                         f"{st.session_state.image_context_text}"
                     )
-                response = rag.query(retrieval_query)
+
+                history_pairs = []
+                running_user = None
+                for msg in st.session_state.messages[:-1]:
+                    role = msg.get("role")
+                    text = msg.get("content", "")
+                    if role == "user":
+                        running_user = text
+                    elif role == "assistant" and running_user is not None:
+                        history_pairs.append((running_user, text))
+                        running_user = None
+
+                if CHAT_HISTORY_TURNS > 0:
+                    history_pairs = history_pairs[-CHAT_HISTORY_TURNS:]
+
+                response = rag.query_with_history(
+                    retrieval_query,
+                    chat_history=history_pairs,
+                    top_k=5,
+                    session_id=session_id,
+                    user_id=session_id,
+                )
             except Exception as e:
                 logger.exception("Chat page: rag.query failed")
                 st.error(f"Query failed: {e}")

@@ -110,6 +110,12 @@ variable "openai_model_name" {
   default = "google/gemini-2.0-flash-001"
 }
 
+variable "chat_history_turns" {
+  description = "Number of past user/assistant turns to include in chat context"
+  type        = number
+  default     = 4
+}
+
 variable "openai_api_key_secret_arn" {
   description = "Secrets Manager ARN for OPENAI_API_KEY"
   type        = string

@@ -35,6 +35,11 @@ worker_openai_api_key_secret_arn     = "arn:aws:secretsmanager:ap-south-1:559387
 streamlit_openai_api_key_secret_arn  = "arn:aws:secretsmanager:ap-south-1:559387212220:secret:openai-api-key-streamlit-xxxx"
 youtube_api_key_secret_arn            = ""
 
+# Model / chat behavior
+openai_base_url    = "https://openrouter.ai/api/v1"
+openai_model_name  = "google/gemini-2.0-flash-001"
+chat_history_turns = 4
+
 # Redis
 # Set null to disable AUTH token; or set strong token string.
 redis_auth_token = null
