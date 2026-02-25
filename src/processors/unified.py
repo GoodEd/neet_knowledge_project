@@ -114,6 +114,7 @@ class ContentProcessor:
                 "track_id": doc.metadata.get("track_id", ""),
                 "title": doc.metadata.get("title", ""),
                 "video_id": doc.metadata.get("video_id", ""),
+                "source_id": doc.metadata.get("source_id", ""),
             }
             for doc in docs
         ]

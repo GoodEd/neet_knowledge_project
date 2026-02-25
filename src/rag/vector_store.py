@@ -124,6 +124,30 @@ class VectorStoreManager:
             shutil.rmtree(self.persist_directory)
 
     def delete_by_source(self, source: str, track_id: Optional[str] = None) -> int:
+        return self._delete_by_metadata_key(
+            metadata_key="source",
+            metadata_value=source,
+            track_id=track_id,
+            include_trackless_when_track_set=True,
+        )
+
+    def delete_by_source_id(
+        self, source_id: str, track_id: Optional[str] = None
+    ) -> int:
+        return self._delete_by_metadata_key(
+            metadata_key="source_id",
+            metadata_value=source_id,
+            track_id=track_id,
+            include_trackless_when_track_set=False,
+        )
+
+    def _delete_by_metadata_key(
+        self,
+        metadata_key: str,
+        metadata_value: str,
+        track_id: Optional[str],
+        include_trackless_when_track_set: bool,
+    ) -> int:
         if not os.path.exists(self.persist_directory):
             return 0
 
@@ -136,10 +160,14 @@ class VectorStoreManager:
         keep_docs: List[Document] = []
         removed = 0
         for doc in all_docs:
-            same_source = doc.metadata.get("source") == source
+            same_source = doc.metadata.get(metadata_key) == metadata_value
             doc_track_id = doc.metadata.get("track_id")
             same_track = track_id is None or doc_track_id == track_id
-            legacy_trackless_match = track_id is not None and not doc_track_id
+            legacy_trackless_match = (
+                include_trackless_when_track_set
+                and track_id is not None
+                and not doc_track_id
+            )
             if same_source and (same_track or legacy_trackless_match):
                 removed += 1
             else:

@@ -219,6 +219,16 @@ class ContentSourceManager:
             file_path, "pdf", title, fetch_interval_hours=0, metadata=metadata
         )
 
+    def add_csv(
+        self,
+        file_path: str,
+        title: Optional[str] = None,
+        metadata: Optional[Dict] = None,
+    ) -> str:
+        return self.add_source(
+            file_path, "csv", title, fetch_interval_hours=0, metadata=metadata
+        )
+
     def remove_source(self, source_id: str) -> bool:
         cur = self._with_retry(
             lambda: self.conn.execute(
@@ -392,7 +402,7 @@ class AutoUpdater:
                 result = self.rag.content_processor.process(source.url)
 
             if result.get("chunked_documents"):
-                self.rag.ingest_processed_content(result)
+                self.rag.ingest_processed_content(result, source_id=source_id)
 
             self.source_manager.mark_fetched(source_id, success=True)
 

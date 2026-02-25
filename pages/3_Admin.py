@@ -51,9 +51,13 @@ def true_delete_source(src):
         track_id = src.metadata.get("track_id")
 
     try:
-        removed_vectors = rag.vector_manager.delete_by_source(
-            src.url, track_id=track_id
+        removed_vectors = rag.vector_manager.delete_by_source_id(
+            src.source_id, track_id=track_id
         )
+        if removed_vectors == 0:
+            removed_vectors = rag.vector_manager.delete_by_source(
+                src.url, track_id=track_id
+            )
     except FileNotFoundError:
         removed_vectors = 0
     except Exception as e:
@@ -137,9 +141,9 @@ col1, col2 = st.columns([1, 2])
 
 with col1:
     st.header("Add New Source")
-    
+
     tab1, tab2 = st.tabs(["Add YouTube", "Upload File (PDF/CSV)"])
-    
+
     with tab1:
         with st.form("add_youtube_form"):
             source_url = st.text_input("YouTube URL")
@@ -151,9 +155,9 @@ with col1:
             )
             s3_audio_uri = st.text_input("S3 Audio URI (Optional)")
             s3_transcript_json_uri = st.text_input("S3 Transcript JSON URI (Optional)")
-            
+
             submit_yt = st.form_submit_button("Add YouTube", type="primary")
-            
+
             if submit_yt and source_url:
                 metadata = {}
                 if track_id:
@@ -162,7 +166,7 @@ with col1:
                     metadata["s3_audio_uri"] = s3_audio_uri
                 if s3_transcript_json_uri:
                     metadata["s3_transcript_json_uri"] = s3_transcript_json_uri
-                
+
                 source_id = source_manager.add_youtube(
                     source_url,
                     source_title or None,
@@ -175,46 +179,61 @@ with col1:
                     st.success("YouTube source added to ingestion queue.")
                 else:
                     st.warning("Queue is not configured; source saved as pending.")
-                    
+
     with tab2:
         with st.form("upload_file_form"):
-            uploaded_file = st.file_uploader("Upload PDF or CSV from your computer", type=["pdf", "csv"])
+            uploaded_file = st.file_uploader(
+                "Upload PDF or CSV from your computer", type=["pdf", "csv"]
+            )
             file_title = st.text_input("Title (Optional)")
-            
+
             # Show all fields as requested by user
             st.markdown("**(Optional) Remote Overrides**")
             file_track_id = st.text_input("Track ID Override")
             file_s3_audio_uri = st.text_input("S3 Audio URI Override")
-            file_s3_transcript_json_uri = st.text_input("S3 Transcript JSON URI Override")
-            
+            file_s3_transcript_json_uri = st.text_input(
+                "S3 Transcript JSON URI Override"
+            )
+
             submit_file = st.form_submit_button("Upload and Ingest", type="primary")
-            
+
             if submit_file and uploaded_file:
                 import tempfile
                 import shutil
-                
+
                 # Save locally to shared EFS so worker can see it
                 uploads_dir = "/shared/data/uploads"
                 os.makedirs(uploads_dir, exist_ok=True)
-                
+
                 safe_filename = uploaded_file.name.replace(" ", "_")
                 file_path = os.path.join(uploads_dir, safe_filename)
-                
+
                 with open(file_path, "wb") as f:
                     f.write(uploaded_file.getbuffer())
-                
+
                 metadata = {}
-                if file_track_id: metadata["track_id"] = file_track_id
-                if file_s3_audio_uri: metadata["s3_audio_uri"] = file_s3_audio_uri
-                if file_s3_transcript_json_uri: metadata["s3_transcript_json_uri"] = file_s3_transcript_json_uri
-                
+                if file_track_id:
+                    metadata["track_id"] = file_track_id
+                if file_s3_audio_uri:
+                    metadata["s3_audio_uri"] = file_s3_audio_uri
+                if file_s3_transcript_json_uri:
+                    metadata["s3_transcript_json_uri"] = file_s3_transcript_json_uri
+
                 source_type = "pdf" if safe_filename.lower().endswith(".pdf") else "csv"
-                
+
                 if source_type == "pdf":
-                    source_id = source_manager.add_pdf(file_path, file_title or None, metadata=metadata if metadata else None)
+                    source_id = source_manager.add_pdf(
+                        file_path,
+                        file_title or None,
+                        metadata=metadata if metadata else None,
+                    )
                 else:
-                    source_id = source_manager.add_csv(file_path, file_title or None, metadata=metadata if metadata else None)
-                    
+                    source_id = source_manager.add_csv(
+                        file_path,
+                        file_title or None,
+                        metadata=metadata if metadata else None,
+                    )
+
                 if queue_enabled and ingestion_queue:
                     # Enqueue using the physical filepath on the shared EFS
                     ingestion_queue.submit_job(
@@ -223,9 +242,11 @@ with col1:
                         source_type=source_type,
                         s3_audio_uri=file_s3_audio_uri or None,
                         s3_transcript_json_uri=file_s3_transcript_json_uri or None,
-                        track_id=file_track_id or None
+                        track_id=file_track_id or None,
                     )
-                    st.success(f"{source_type.upper()} file uploaded and added to ingestion queue.")
+                    st.success(
+                        f"{source_type.upper()} file uploaded and added to ingestion queue."
+                    )
                 else:
                     st.warning("Queue is not configured; source saved as pending.")
 

@@ -66,11 +66,16 @@ class NEETRAG:
         self.logger = logging.getLogger(__name__)
 
     def ingest_processed_content(
-        self, processed_result: Dict[str, Any]
+        self, processed_result: Dict[str, Any], source_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """Ingest content that has already been processed into chunks."""
         chunked_docs = processed_result.get("chunked_documents", [])
         source = processed_result.get("source", "Unknown")
+
+        if chunked_docs and source_id:
+            for chunk in chunked_docs:
+                if isinstance(chunk, dict):
+                    chunk["source_id"] = source_id
 
         if chunked_docs:
             langchain_docs = self._convert_to_langchain_docs(chunked_docs)
@@ -409,7 +414,9 @@ class NEETRAG:
             return {"answer": "No relevant information found.", "sources": []}
 
         prompt = self.prompt_builder.build_with_history(
-            query=question, context_docs=relevant_docs, chat_history=chat_history
+            query=question,
+            context_docs=relevant_docs,
+            chat_history=chat_history or [],
         )
         self.logger.info("LLM prompt payload with history: %s", prompt)
 
