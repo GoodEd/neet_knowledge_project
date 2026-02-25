@@ -141,6 +141,45 @@ class VectorStoreManager:
             include_trackless_when_track_set=False,
         )
 
+    def delete_by_source_id_and_question_id(
+        self, source_id: str, question_id: str
+    ) -> int:
+        if not os.path.exists(self.persist_directory):
+            return 0
+
+        if self.vectorstore is None:
+            self.load_vectorstore()
+
+        doc_map = getattr(self.vectorstore.docstore, "_dict", {})
+        all_docs = [doc for doc in doc_map.values() if isinstance(doc, Document)]
+
+        keep_docs: List[Document] = []
+        removed = 0
+        for doc in all_docs:
+            same_source_id = doc.metadata.get("source_id") == source_id
+            same_question_id = str(doc.metadata.get("question_id", "")) == str(
+                question_id
+            )
+            if same_source_id and same_question_id:
+                removed += 1
+            else:
+                keep_docs.append(doc)
+
+        if removed == 0:
+            return 0
+
+        if keep_docs:
+            self.vectorstore = FAISS.from_documents(
+                documents=keep_docs,
+                embedding=self.embeddings,
+            )
+            self.vectorstore.save_local(self.persist_directory)
+        else:
+            self.delete_collection()
+            self.vectorstore = None
+
+        return removed
+
     def _delete_by_metadata_key(
         self,
         metadata_key: str,

@@ -3,6 +3,8 @@ import os
 import sys
 import uuid
 import json
+import logging
+import traceback
 import redis
 from dotenv import load_dotenv
 
@@ -12,6 +14,13 @@ from src.utils.rag_singleton import get_rag_system
 from src.utils.ui_helpers import hide_admin_and_toolbar
 
 load_dotenv()
+logger = logging.getLogger(__name__)
+
+
+def debug_log(message: str):
+    logger.info(message)
+    print(message)
+
 
 st.set_page_config(page_title="NEET Chat", layout="wide")
 
@@ -22,8 +31,10 @@ hide_admin_and_toolbar()
 def get_redis_client():
     redis_url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
     try:
+        debug_log(f"Chat page: connecting to Redis at {redis_url}")
         return redis.from_url(redis_url)
     except Exception as e:
+        logger.exception("Chat page: Redis connection failed")
         st.warning("Redis not connected. History will not be saved across sessions.")
         return None
 
@@ -35,7 +46,7 @@ if "session_id" not in st.session_state:
     # Use query params if passed (for history links), otherwise create new
     query_params = st.query_params
     if "session_id" in query_params:
-        st.session_state.session_id = query_params["session_id"]
+        st.session_state.session_id = str(query_params["session_id"])
     else:
         st.session_state.session_id = str(uuid.uuid4())
 
@@ -45,7 +56,19 @@ redis_key = f"chat_history:{session_id}"
 # Load history from Redis if it exists
 if "messages" not in st.session_state:
     if r and r.exists(redis_key):
-        st.session_state.messages = json.loads(r.get(redis_key))
+        try:
+            raw_history = r.get(redis_key)
+            if isinstance(raw_history, (bytes, bytearray)):
+                raw_history = raw_history.decode("utf-8", errors="ignore")
+            if isinstance(raw_history, str):
+                st.session_state.messages = json.loads(raw_history)
+            else:
+                st.session_state.messages = []
+        except Exception:
+            logger.exception(
+                "Chat page: failed to parse history from Redis key=%s", redis_key
+            )
+            st.session_state.messages = []
     else:
         st.session_state.messages = []
 
@@ -57,7 +80,15 @@ def save_history():
         )  # Save for 7 days
 
 
-rag = get_rag_system()
+try:
+    debug_log(f"Chat page: initializing RAG singleton for session_id={session_id}")
+    rag = get_rag_system()
+    debug_log("Chat page: RAG initialized successfully")
+except Exception as e:
+    logger.exception("Chat page: get_rag_system failed")
+    st.error(f"Chat initialization failed: {e}")
+    st.code(traceback.format_exc())
+    st.stop()
 
 # --- UI ---
 st.title("💬 NEET Knowledge Assistant")
@@ -109,7 +140,14 @@ if prompt := st.chat_input("Ask a question about NEET 2025..."):
     # 2. Generate and display assistant response
     with st.chat_message("assistant"):
         with st.spinner("Searching knowledge base..."):
-            response = rag.query(prompt)
+            try:
+                debug_log(f"Chat page: executing rag.query for session_id={session_id}")
+                response = rag.query(prompt)
+            except Exception as e:
+                logger.exception("Chat page: rag.query failed")
+                st.error(f"Query failed: {e}")
+                st.code(traceback.format_exc())
+                st.stop()
             answer = response.get("answer", "No answer generated.")
             sources = response.get("sources", [])
 

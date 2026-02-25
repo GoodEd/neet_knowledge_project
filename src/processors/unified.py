@@ -7,6 +7,7 @@ from .youtube_processor import YouTubeProcessor
 from .text_processor import TextProcessor, MarkdownProcessor
 from .html_processor import HTMLProcessor
 from .video_processor import VideoProcessor, AudioProcessor
+from .csv_processor import CSVProcessor
 
 
 class ContentProcessor:
@@ -27,6 +28,7 @@ class ContentProcessor:
         self.html_processor = HTMLProcessor()
         self.video_processor = VideoProcessor()
         self.audio_processor = AudioProcessor()
+        self.csv_processor = CSVProcessor()
 
         self.chunker = DocumentChunker(chunk_size, chunk_overlap)
 
@@ -50,6 +52,7 @@ class ContentProcessor:
             ".wav": self.audio_processor,
             ".flac": self.audio_processor,
             ".m4a": self.audio_processor,
+            ".csv": self.csv_processor,
         }
 
         processor = processor_map.get(extension)
@@ -60,6 +63,8 @@ class ContentProcessor:
         if self._is_url(file_path):
             if "youtube.com" in file_path or "youtu.be" in file_path:
                 result = self.youtube_processor.process(file_path)
+            elif file_path.lower().endswith(".csv") or ".csv?" in file_path.lower():
+                result = self.csv_processor.process(file_path)
             elif file_path.startswith("http"):
                 result = self.html_processor.process_url(file_path)
             else:
@@ -68,7 +73,10 @@ class ContentProcessor:
             result = processor.process(file_path)
 
         if result.get("documents"):
-            chunked = self.chunker.chunk_documents(result["documents"])
+            if any(d.get("content_type") == "csv_qa_pair" for d in result["documents"]):
+                chunked = result["documents"]
+            else:
+                chunked = self.chunker.chunk_documents(result["documents"])
             result["chunked_documents"] = chunked
             result["total_chunks"] = len(chunked)
 
@@ -159,5 +167,6 @@ class ContentProcessor:
             "web": [".html", ".htm"],
             "video": [".mp4", ".avi", ".mov", ".mkv", ".webm"],
             "audio": [".mp3", ".wav", ".flac", ".m4a"],
+            "data": [".csv"],
             "url": ["YouTube URLs", "HTTP/HTTPS URLs"],
         }
