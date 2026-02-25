@@ -32,7 +32,15 @@ def get_redis_client():
     redis_url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
     try:
         debug_log(f"Chat page: connecting to Redis at {redis_url}")
-        return redis.from_url(redis_url)
+        client = redis.from_url(
+            redis_url,
+            socket_connect_timeout=2,
+            socket_timeout=2,
+            retry_on_timeout=False,
+        )
+        client.ping()
+        debug_log("Chat page: Redis ping successful")
+        return client
     except Exception as e:
         logger.exception("Chat page: Redis connection failed")
         st.warning("Redis not connected. History will not be saved across sessions.")
@@ -55,29 +63,29 @@ redis_key = f"chat_history:{session_id}"
 
 # Load history from Redis if it exists
 if "messages" not in st.session_state:
-    if r and r.exists(redis_key):
+    st.session_state.messages = []
+    if r:
         try:
-            raw_history = r.get(redis_key)
-            if isinstance(raw_history, (bytes, bytearray)):
-                raw_history = raw_history.decode("utf-8", errors="ignore")
-            if isinstance(raw_history, str):
-                st.session_state.messages = json.loads(raw_history)
-            else:
-                st.session_state.messages = []
+            if r.exists(redis_key):
+                raw_history = r.get(redis_key)
+                if isinstance(raw_history, (bytes, bytearray)):
+                    raw_history = raw_history.decode("utf-8", errors="ignore")
+                if isinstance(raw_history, str):
+                    st.session_state.messages = json.loads(raw_history)
         except Exception:
             logger.exception(
-                "Chat page: failed to parse history from Redis key=%s", redis_key
+                "Chat page: failed to load history from Redis key=%s", redis_key
             )
-            st.session_state.messages = []
-    else:
-        st.session_state.messages = []
 
 
 def save_history():
     if r:
-        r.setex(
-            redis_key, 86400 * 7, json.dumps(st.session_state.messages)
-        )  # Save for 7 days
+        try:
+            r.setex(redis_key, 86400 * 7, json.dumps(st.session_state.messages))
+        except Exception:
+            logger.exception(
+                "Chat page: failed to save history to Redis key=%s", redis_key
+            )
 
 
 try:
