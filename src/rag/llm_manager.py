@@ -1,5 +1,6 @@
 from typing import Optional, Dict, Any, List
 import os
+import base64
 
 
 class LLMManager:
@@ -63,12 +64,73 @@ class LLMManager:
             return response.content
         return str(response)
 
+    def extract_image_context(
+        self, image_bytes: bytes, filename: str = "image.png", user_hint: str = ""
+    ) -> str:
+        if self.provider not in {"openai", "openrouter"}:
+            raise ValueError(
+                "Image extraction requires openai/openrouter provider in current setup"
+            )
+
+        from openai import OpenAI
+
+        api_key = os.getenv("OPENAI_API_KEY")
+        base_url = os.getenv("OPENAI_BASE_URL")
+        vision_model = os.getenv("VISION_MODEL_NAME", self.model)
+
+        if not api_key:
+            raise ValueError("OPENAI_API_KEY is required for image context extraction")
+
+        mime = "image/png"
+        lower_name = (filename or "").lower()
+        if lower_name.endswith(".jpg") or lower_name.endswith(".jpeg"):
+            mime = "image/jpeg"
+        elif lower_name.endswith(".webp"):
+            mime = "image/webp"
+
+        image_data = base64.b64encode(image_bytes).decode("utf-8")
+        image_url = f"data:{mime};base64,{image_data}"
+
+        system_prompt = (
+            "You are a NEET exam assistant. Extract the problem statement from the image with high fidelity. "
+            "Preserve key formulas, options, units, and diagram cues in plain text. "
+            "Return concise structured text with sections: QUESTION, OPTIONS (if any), KNOWN VALUES, "
+            "WHAT IS ASKED, and TOPIC GUESS."
+        )
+        hint_suffix = f"User hint: {user_hint}" if user_hint else ""
+        user_prompt = (
+            "Read this uploaded question image and produce retrieval-friendly context text. "
+            "Do not solve it. Only extract and normalize the question information. "
+            f"{hint_suffix}"
+        )
+
+        client = OpenAI(api_key=api_key, base_url=base_url)
+        response = client.chat.completions.create(
+            model=vision_model,
+            temperature=0.2,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": user_prompt},
+                        {"type": "image_url", "image_url": {"url": image_url}},
+                    ],
+                },
+            ],
+        )
+
+        content = response.choices[0].message.content
+        if isinstance(content, str):
+            return content.strip()
+        return str(content).strip()
+
     def get_model_info(self) -> Dict[str, Any]:
         return {"provider": self.provider, "model": self.model}
 
 
 class RAGPromptBuilder:
-    def __init__(self, system_prompt: str = None):
+    def __init__(self, system_prompt: Optional[str] = None):
         self.default_system_prompt = system_prompt or self._get_default_system_prompt()
 
     def _get_default_system_prompt(self) -> str:
@@ -124,7 +186,7 @@ Please provide a helpful answer based on the context above."""
                         source_label = f"{title} (Time: {start_time}s)"
                     else:
                         source_label = source
-                        
+
                     if source_label not in sources:
                         sources.append(source_label)
             if sources:
@@ -133,7 +195,10 @@ Please provide a helpful answer based on the context above."""
         return prompt
 
     def build_with_history(
-        self, query: str, context_docs: List[Any], chat_history: List[tuple] = None
+        self,
+        query: str,
+        context_docs: List[Any],
+        chat_history: Optional[List[tuple]] = None,
     ) -> str:
         prompt = self.build_prompt(query, context_docs)
 

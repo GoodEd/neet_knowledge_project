@@ -5,6 +5,7 @@ import uuid
 import json
 import logging
 import traceback
+import hashlib
 from urllib.parse import urlparse
 import redis
 from dotenv import load_dotenv
@@ -118,6 +119,51 @@ except Exception as e:
 st.title("💬 NEET Knowledge Assistant")
 st.caption(f"Session ID: `{session_id}` (Save this to restore your chat later!)")
 
+if "image_context_text" not in st.session_state:
+    st.session_state.image_context_text = ""
+if "image_context_hash" not in st.session_state:
+    st.session_state.image_context_hash = ""
+if "reuse_image_context" not in st.session_state:
+    st.session_state.reuse_image_context = True
+
+with st.sidebar:
+    st.subheader("Image Question Context")
+    uploaded_image = st.file_uploader(
+        "Upload question image (JPG/PNG/WebP)",
+        type=["png", "jpg", "jpeg", "webp"],
+        key="chat_image_uploader",
+    )
+    st.session_state.reuse_image_context = st.checkbox(
+        "Reuse last image context for next questions",
+        value=st.session_state.reuse_image_context,
+    )
+
+    if st.button("Clear Image Context"):
+        st.session_state.image_context_text = ""
+        st.session_state.image_context_hash = ""
+        st.success("Image context cleared.")
+
+    if uploaded_image is not None:
+        image_bytes = uploaded_image.getvalue()
+        image_hash = hashlib.md5(image_bytes).hexdigest()
+        if st.session_state.image_context_hash != image_hash:
+            try:
+                with st.spinner("Extracting question context from image..."):
+                    extracted = rag.llm_manager.extract_image_context(
+                        image_bytes=image_bytes,
+                        filename=uploaded_image.name,
+                    )
+                st.session_state.image_context_text = extracted
+                st.session_state.image_context_hash = image_hash
+                st.success("Image context extracted and stored.")
+            except Exception as e:
+                logger.exception("Chat page: image context extraction failed")
+                st.error(f"Image extraction failed: {e}")
+
+    if st.session_state.image_context_text:
+        st.caption("Active image context preview")
+        st.text(st.session_state.image_context_text[:700])
+
 # Display chat history
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
@@ -166,7 +212,17 @@ if prompt := st.chat_input("Ask a question about NEET 2025..."):
         with st.spinner("Searching knowledge base..."):
             try:
                 debug_log(f"Chat page: executing rag.query for session_id={session_id}")
-                response = rag.query(prompt)
+                retrieval_query = prompt
+                if (
+                    st.session_state.reuse_image_context
+                    and st.session_state.image_context_text
+                ):
+                    retrieval_query = (
+                        f"{prompt}\n\n"
+                        "Image context from uploaded question image:\n"
+                        f"{st.session_state.image_context_text}"
+                    )
+                response = rag.query(retrieval_query)
             except Exception as e:
                 logger.exception("Chat page: rag.query failed")
                 st.error(f"Query failed: {e}")
