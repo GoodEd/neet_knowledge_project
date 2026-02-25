@@ -41,7 +41,7 @@ content:
 # RAG Settings
 rag:
   retrieval_top_k: 5
-  similarity_threshold: 0.7
+  similarity_threshold: 0.5
 
 # Paths
 paths:
