@@ -7,12 +7,14 @@ st.set_page_config(page_title="Chat History", layout="wide")
 
 st.title("📜 Your Chat History")
 
+
 def get_redis_client():
     redis_url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
     try:
         return redis.from_url(redis_url)
     except Exception as e:
         return None
+
 
 r = get_redis_client()
 
@@ -37,11 +39,14 @@ with col2:
 
 if search_pressed and lookup_id:
     redis_key = f"chat_history:{lookup_id}"
-    
+
     if r.exists(redis_key):
-        st.success(f"History found! Click the button below to resume your chat.")
-        st.link_button(f"Resume Chat Session", f"/Chat?session_id={lookup_id}", type="primary")
-        
+        st.success("History found! Click the button below to resume your chat.")
+        if st.button("Resume Chat Session", type="primary"):
+            st.session_state.session_id = lookup_id
+            st.query_params["session_id"] = lookup_id
+            st.switch_page("pages/1_Chat.py")
+
         with st.expander("Preview Conversation"):
             messages = json.loads(r.get(redis_key))
             for msg in messages:

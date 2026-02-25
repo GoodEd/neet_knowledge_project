@@ -1,5 +1,7 @@
 from typing import Dict, Any, List, Optional
 from pathlib import Path
+import contextlib
+import io
 import os
 
 from langchain_core.documents import Document
@@ -30,11 +32,21 @@ class VectorStoreManager:
 
     def _initialize_embeddings(self):
         if self.embedding_provider == "huggingface":
-            self.embeddings = HuggingFaceEmbeddings(
-                model_name=self.embedding_model,
-                model_kwargs={"device": "cpu"},
-                encode_kwargs={"normalize_embeddings": True},
-            )
+            os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
+            os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
+
+            def _build_hf_embeddings() -> HuggingFaceEmbeddings:
+                return HuggingFaceEmbeddings(
+                    model_name=self.embedding_model,
+                    model_kwargs={"device": "cpu"},
+                    encode_kwargs={"normalize_embeddings": True},
+                )
+
+            try:
+                self.embeddings = _build_hf_embeddings()
+            except BrokenPipeError:
+                with contextlib.redirect_stderr(io.StringIO()):
+                    self.embeddings = _build_hf_embeddings()
         elif self.embedding_provider == "openai":
             self.embeddings = OpenAIEmbeddings(
                 model="text-embedding-3-small", api_key=os.getenv("OPENAI_API_KEY")
