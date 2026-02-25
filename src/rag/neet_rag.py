@@ -346,24 +346,13 @@ class NEETRAG:
         seen = set()
 
         for doc in docs:
-            source_type = doc.metadata.get("source_type") or doc.metadata.get(
-                "content_type", ""
-            )
+            if not self._is_youtube_doc(doc):
+                continue
 
-            if self._is_youtube_doc(doc):
-                video_id = doc.metadata.get("video_id") or self._extract_video_id(
-                    doc.metadata.get("source", "")
-                )
-                key = ("youtube", video_id or doc.metadata.get("source", ""))
-            elif source_type == "csv":
-                key = (
-                    "csv",
-                    doc.metadata.get("source_id", ""),
-                    str(doc.metadata.get("question_id", "")),
-                    doc.metadata.get("source", ""),
-                )
-            else:
-                key = (source_type or "text", doc.metadata.get("source", ""))
+            video_id = doc.metadata.get("video_id") or self._extract_video_id(
+                doc.metadata.get("source", "")
+            )
+            key = ("youtube", video_id or doc.metadata.get("source", ""))
 
             if key in seen:
                 continue

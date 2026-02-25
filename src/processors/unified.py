@@ -88,12 +88,14 @@ class ContentProcessor:
         s3_audio_uri: Optional[str] = None,
         s3_transcript_json_uri: Optional[str] = None,
         track_id: Optional[str] = None,
+        video_title: Optional[str] = None,
     ) -> Dict[str, Any]:
         result = self.youtube_processor.process(
             video_url,
             s3_audio_uri=s3_audio_uri,
             s3_transcript_json_uri=s3_transcript_json_uri,
             track_id=track_id,
+            video_title=video_title,
         )
 
         # YoutubeProcessor already returns chunked documents effectively,

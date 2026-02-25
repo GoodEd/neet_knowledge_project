@@ -391,6 +391,7 @@ class AutoUpdater:
                     s3_audio_uri=s3_audio_uri,
                     s3_transcript_json_uri=s3_transcript_json_uri,
                     track_id=track_id,
+                    video_title=source.title,
                 )
             elif source.source_type == "html":
                 result = self.rag.content_processor.process_html_content(

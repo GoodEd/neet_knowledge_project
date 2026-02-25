@@ -38,6 +38,7 @@ class YouTubeProcessor:
         s3_audio_uri: Optional[str] = None,
         s3_transcript_json_uri: Optional[str] = None,
         track_id: Optional[str] = None,
+        video_title: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Process a YouTube video URL and return a result dictionary.
@@ -55,11 +56,22 @@ class YouTubeProcessor:
         logger.info(f"Processing YouTube video: {video_id}")
 
         # 1. Fetch Metadata (Prefer API if available)
-        video_title = "Unknown Video"
+        video_title = (video_title or "").strip() or "Unknown Video"
         if self.youtube_client:
             metadata = self._get_metadata_from_api(video_id)
             if metadata:
                 video_title = metadata.get("title", video_title)
+
+        if video_title == "Unknown Video" and s3_transcript_json_uri:
+            inferred = self._infer_title_from_transcript_uri(
+                s3_transcript_json_uri=s3_transcript_json_uri,
+                video_id=video_id,
+            )
+            if inferred:
+                video_title = inferred
+
+        if video_title == "Unknown Video" and video_id:
+            video_title = f"YouTube Video ({video_id})"
 
         transcript_data = []
         transcript_origin = ""
@@ -274,6 +286,22 @@ class YouTubeProcessor:
 
         raise RuntimeError(f"Failed to fetch transcript: {error_msg}")
 
+    def _infer_title_from_transcript_uri(
+        self, s3_transcript_json_uri: str, video_id: str
+    ) -> str:
+        base_name = os.path.basename(s3_transcript_json_uri.split("?")[0])
+        if not base_name:
+            return ""
+
+        name = re.sub(r"\.json$", "", base_name, flags=re.IGNORECASE)
+        name = re.sub(r"_[a-z]{2}$", "", name, flags=re.IGNORECASE)
+        name = re.sub(r"_\d{4}-\d{2}-\d{2}$", "", name)
+        if video_id and name.startswith(f"{video_id}_"):
+            name = name[len(video_id) + 1 :]
+        name = name.replace("_", " ").strip()
+        name = re.sub(r"\s+", " ", name)
+        return name[:180]
+
     def _maybe_add_backup_transcript_docs(
         self,
         documents: List[Document],
@@ -287,7 +315,9 @@ class YouTubeProcessor:
             return documents
 
         if not s3_audio_uri:
-            logger.info("No s3_audio_uri provided. Skipping backup transcript generation completely.")
+            logger.info(
+                "No s3_audio_uri provided. Skipping backup transcript generation completely."
+            )
             return documents
 
         backup_entries: List[Dict[str, Any]] = []
@@ -988,7 +1018,6 @@ class YouTubeProcessor:
                 return match.group(1)
         return None
 
-
     def _create_documents(
         self, transcript_data: List[Dict[str, Any]], url: str, video_id: str
     ) -> List[Document]:
@@ -1050,5 +1079,3 @@ class YouTubeProcessor:
             i = next_i
 
         return documents
-
-        
