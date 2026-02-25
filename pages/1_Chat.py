@@ -5,6 +5,7 @@ import uuid
 import json
 import logging
 import traceback
+from urllib.parse import urlparse
 import redis
 from dotenv import load_dotenv
 
@@ -30,18 +31,33 @@ hide_admin_and_toolbar()
 # --- Redis Session Management ---
 def get_redis_client():
     redis_url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
-    try:
-        debug_log(f"Chat page: connecting to Redis at {redis_url}")
-        client = redis.from_url(
-            redis_url,
+
+    def _build_client(url: str):
+        return redis.from_url(
+            url,
             socket_connect_timeout=2,
             socket_timeout=2,
             retry_on_timeout=False,
         )
+
+    try:
+        debug_log(f"Chat page: connecting to Redis at {redis_url}")
+        client = _build_client(redis_url)
         client.ping()
         debug_log("Chat page: Redis ping successful")
         return client
-    except Exception as e:
+    except Exception:
+        parsed = urlparse(redis_url)
+        if parsed.scheme == "redis":
+            tls_url = redis_url.replace("redis://", "rediss://", 1)
+            try:
+                debug_log(f"Chat page: retrying Redis with TLS URL {tls_url}")
+                client = _build_client(tls_url)
+                client.ping()
+                debug_log("Chat page: Redis TLS ping successful")
+                return client
+            except Exception:
+                logger.exception("Chat page: Redis TLS retry failed")
         logger.exception("Chat page: Redis connection failed")
         st.warning("Redis not connected. History will not be saved across sessions.")
         return None

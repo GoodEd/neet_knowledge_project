@@ -342,22 +342,36 @@ class NEETRAG:
         return source_type == "youtube"
 
     def _build_public_sources(self, docs: List[Document]) -> List[Dict[str, Any]]:
-        best_doc_by_video: Dict[str, Document] = {}
-        video_order: List[str] = []
+        selected_docs: List[Document] = []
+        seen = set()
 
         for doc in docs:
-            if not self._is_youtube_doc(doc):
-                continue
-            video_id = doc.metadata.get("video_id") or self._extract_video_id(
-                doc.metadata.get("source", "")
+            source_type = doc.metadata.get("source_type") or doc.metadata.get(
+                "content_type", ""
             )
-            key = video_id or doc.metadata.get("source", "")
-            if key in best_doc_by_video:
-                continue
-            best_doc_by_video[key] = doc
-            video_order.append(key)
 
-        return [self._build_source_info(best_doc_by_video[k]) for k in video_order]
+            if self._is_youtube_doc(doc):
+                video_id = doc.metadata.get("video_id") or self._extract_video_id(
+                    doc.metadata.get("source", "")
+                )
+                key = ("youtube", video_id or doc.metadata.get("source", ""))
+            elif source_type == "csv":
+                key = (
+                    "csv",
+                    doc.metadata.get("source_id", ""),
+                    str(doc.metadata.get("question_id", "")),
+                    doc.metadata.get("source", ""),
+                )
+            else:
+                key = (source_type or "text", doc.metadata.get("source", ""))
+
+            if key in seen:
+                continue
+
+            seen.add(key)
+            selected_docs.append(doc)
+
+        return [self._build_source_info(doc) for doc in selected_docs]
 
     def query(
         self, question: str, top_k: int = 5, include_sources: bool = True
