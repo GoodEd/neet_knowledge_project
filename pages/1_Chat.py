@@ -128,8 +128,8 @@ if "image_context_text" not in st.session_state:
     st.session_state.image_context_text = ""
 if "image_context_hash" not in st.session_state:
     st.session_state.image_context_hash = ""
-if "reuse_image_context" not in st.session_state:
-    st.session_state.reuse_image_context = True
+if "image_context_pending" not in st.session_state:
+    st.session_state.image_context_pending = False
 
 # Display chat history
 for message in st.session_state.messages:
@@ -166,44 +166,53 @@ for message in st.session_state.messages:
 
                     st.text(src.get("content", ""))
 
-st.subheader("Image Question Context")
+st.subheader("Upload Question")
 uploaded_image = st.file_uploader(
     "Upload question image (JPG/PNG/WebP)",
     type=["png", "jpg", "jpeg", "webp"],
     key="chat_image_uploader",
 )
-st.session_state.reuse_image_context = st.checkbox(
-    "Reuse last image context for next questions",
-    value=st.session_state.reuse_image_context,
-)
 
 if st.button("Clear Image Context"):
     st.session_state.image_context_text = ""
     st.session_state.image_context_hash = ""
+    st.session_state.image_context_pending = False
     st.success("Image context cleared.")
 
 if uploaded_image is not None:
     image_bytes = uploaded_image.getvalue()
-    image_hash = hashlib.md5(image_bytes).hexdigest()
-    if st.session_state.image_context_hash != image_hash:
-        try:
-            with st.spinner("Extracting question context from image..."):
-                extracted = rag.llm_manager.extract_image_context(
-                    image_bytes=image_bytes,
-                    filename=uploaded_image.name,
-                    session_id=session_id,
-                    user_id=session_id,
+    if len(image_bytes) > 5 * 1024 * 1024:
+        st.error("Image is too large. Please upload an image up to 5 MB.")
+    else:
+        image_hash = hashlib.md5(image_bytes).hexdigest()
+        if st.session_state.image_context_hash != image_hash:
+            try:
+                with st.spinner("Extracting question context from image..."):
+                    extracted = rag.llm_manager.extract_image_context(
+                        image_bytes=image_bytes,
+                        filename=uploaded_image.name,
+                        session_id=session_id,
+                        user_id=session_id,
+                    )
+                st.session_state.image_context_text = extracted
+                st.session_state.image_context_hash = image_hash
+                st.session_state.image_context_pending = True
+                st.success(
+                    "Image context extracted and will be used for the next reply."
                 )
-            st.session_state.image_context_text = extracted
-            st.session_state.image_context_hash = image_hash
-            st.success("Image context extracted and stored.")
-        except Exception as e:
-            logger.exception("Chat page: image context extraction failed")
-            st.error(f"Image extraction failed: {e}")
+            except Exception as e:
+                logger.exception("Chat page: image context extraction failed")
+                st.error(f"Image extraction failed: {e}")
 
 if st.session_state.image_context_text:
-    st.caption("Active image context preview")
-    st.text(st.session_state.image_context_text[:700])
+    st.caption("Image context (used only for the next reply)")
+    st.text_area(
+        "",
+        value=st.session_state.image_context_text,
+        height=220,
+        disabled=True,
+        key="image_context_preview",
+    )
 
 # User Input
 if prompt := st.chat_input(
@@ -222,7 +231,7 @@ if prompt := st.chat_input(
                 debug_log(f"Chat page: executing rag.query for session_id={session_id}")
                 retrieval_query = prompt
                 if (
-                    st.session_state.reuse_image_context
+                    st.session_state.image_context_pending
                     and st.session_state.image_context_text
                 ):
                     retrieval_query = (
@@ -252,6 +261,8 @@ if prompt := st.chat_input(
                     session_id=session_id,
                     user_id=session_id,
                 )
+                if st.session_state.image_context_pending:
+                    st.session_state.image_context_pending = False
             except Exception as e:
                 logger.exception("Chat page: rag.query failed")
                 st.error(f"Query failed: {e}")
