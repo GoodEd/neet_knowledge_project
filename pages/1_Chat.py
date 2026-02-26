@@ -130,6 +130,8 @@ if "image_context_hash" not in st.session_state:
     st.session_state.image_context_hash = ""
 if "image_context_pending" not in st.session_state:
     st.session_state.image_context_pending = False
+if "image_upload_event_id" not in st.session_state:
+    st.session_state.image_upload_event_id = ""
 
 # Display chat history
 for message in st.session_state.messages:
@@ -180,29 +182,46 @@ if st.button("Clear Image Context"):
     st.success("Image context cleared.")
 
 if uploaded_image is not None:
+    upload_event_id = str(getattr(uploaded_image, "file_id", ""))
+    if not upload_event_id:
+        upload_event_id = (
+            f"{uploaded_image.name}:{uploaded_image.size}:{uploaded_image.type}"
+        )
+
     image_bytes = uploaded_image.getvalue()
     if len(image_bytes) > 5 * 1024 * 1024:
         st.error("Image is too large. Please upload an image up to 5 MB.")
+        st.session_state.image_upload_event_id = ""
     else:
-        image_hash = hashlib.md5(image_bytes).hexdigest()
-        if st.session_state.image_context_hash != image_hash:
-            try:
-                with st.spinner("Extracting question context from image..."):
-                    extracted = rag.llm_manager.extract_image_context(
-                        image_bytes=image_bytes,
-                        filename=uploaded_image.name,
-                        session_id=session_id,
-                        user_id=session_id,
+        if st.session_state.image_upload_event_id != upload_event_id:
+            st.session_state.image_upload_event_id = upload_event_id
+            image_hash = hashlib.md5(image_bytes).hexdigest()
+            if st.session_state.image_context_hash != image_hash:
+                try:
+                    with st.spinner("Extracting question context from image..."):
+                        extracted = rag.llm_manager.extract_image_context(
+                            image_bytes=image_bytes,
+                            filename=uploaded_image.name,
+                            session_id=session_id,
+                            user_id=session_id,
+                        )
+                    st.session_state.image_context_text = extracted
+                    st.session_state.image_context_hash = image_hash
+                    st.session_state.image_context_pending = True
+                    st.success(
+                        "Image context extracted and will be used for the next reply."
                     )
-                st.session_state.image_context_text = extracted
-                st.session_state.image_context_hash = image_hash
-                st.session_state.image_context_pending = True
-                st.success(
-                    "Image context extracted and will be used for the next reply."
-                )
-            except Exception as e:
-                logger.exception("Chat page: image context extraction failed")
-                st.error(f"Image extraction failed: {e}")
+                except Exception as e:
+                    logger.exception("Chat page: image context extraction failed")
+                    st.error(f"Image extraction failed: {e}")
+            elif st.session_state.image_context_text:
+                if not st.session_state.image_context_pending:
+                    st.session_state.image_context_pending = True
+                    st.success(
+                        "Image context reused and will be used for the next reply."
+                    )
+                else:
+                    st.info("Image context is already queued for the next reply.")
 
 if st.session_state.image_context_text:
     st.caption("Image context (used only for the next reply)")
