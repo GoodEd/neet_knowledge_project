@@ -65,6 +65,15 @@ class NEETRAG:
         self._vectorstore_loaded = False
         self.logger = logging.getLogger(__name__)
 
+    @staticmethod
+    def _knowledge_base_unavailable(question: str, error: str) -> Dict[str, Any]:
+        return {
+            "question": question,
+            "answer": "Knowledge base is empty or unavailable. Please ingest content first.",
+            "sources": [],
+            "error": error,
+        }
+
     def ingest_processed_content(
         self, processed_result: Dict[str, Any], source_id: Optional[str] = None
     ) -> Dict[str, Any]:
@@ -423,7 +432,10 @@ class NEETRAG:
             except:
                 pass
 
-        relevant_docs = self._retrieve_docs(question=question, top_k=top_k)
+        try:
+            relevant_docs = self._retrieve_docs(question=question, top_k=top_k)
+        except Exception as e:
+            return self._knowledge_base_unavailable(question=question, error=str(e))
 
         if not relevant_docs:
             return {"answer": "No relevant information found.", "sources": []}

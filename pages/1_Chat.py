@@ -130,8 +130,6 @@ if "image_context_hash" not in st.session_state:
     st.session_state.image_context_hash = ""
 if "image_context_pending" not in st.session_state:
     st.session_state.image_context_pending = False
-if "image_upload_event_id" not in st.session_state:
-    st.session_state.image_upload_event_id = ""
 
 # Display chat history
 for message in st.session_state.messages:
@@ -168,33 +166,50 @@ for message in st.session_state.messages:
 
                     st.text(src.get("content", ""))
 
-st.subheader("Upload Question")
-uploaded_image = st.file_uploader(
-    "Upload question image (JPG/PNG/WebP)",
-    type=["png", "jpg", "jpeg", "webp"],
-    key="chat_image_uploader",
+if st.session_state.image_context_text:
+    st.caption("Image context (used only for the next reply)")
+    st.text_area(
+        "",
+        value=st.session_state.image_context_text,
+        height=220,
+        disabled=True,
+        key="image_context_preview",
+    )
+    if st.button("Clear Image Context"):
+        st.session_state.image_context_text = ""
+        st.session_state.image_context_hash = ""
+        st.session_state.image_context_pending = False
+        st.success("Image context cleared.")
+
+# User Input
+chat_payload = st.chat_input(
+    "Ask a PYQ question and get its solution from your favourite teachers on youtube",
+    accept_file=True,
+    file_type=["png", "jpg", "jpeg", "webp"],
+    max_upload_size=5,
 )
 
-if st.button("Clear Image Context"):
-    st.session_state.image_context_text = ""
-    st.session_state.image_context_hash = ""
-    st.session_state.image_context_pending = False
-    st.success("Image context cleared.")
-
-if uploaded_image is not None:
-    upload_event_id = str(getattr(uploaded_image, "file_id", ""))
-    if not upload_event_id:
-        upload_event_id = (
-            f"{uploaded_image.name}:{uploaded_image.size}:{uploaded_image.type}"
-        )
-
-    image_bytes = uploaded_image.getvalue()
-    if len(image_bytes) > 5 * 1024 * 1024:
-        st.error("Image is too large. Please upload an image up to 5 MB.")
-        st.session_state.image_upload_event_id = ""
+if chat_payload:
+    prompt = ""
+    uploaded_image = None
+    if isinstance(chat_payload, str):
+        prompt = chat_payload.strip()
     else:
-        if st.session_state.image_upload_event_id != upload_event_id:
-            st.session_state.image_upload_event_id = upload_event_id
+        prompt = str(getattr(chat_payload, "text", "") or "").strip()
+        files = list(getattr(chat_payload, "files", []) or [])
+        if not files and isinstance(chat_payload, dict):
+            files = list(chat_payload.get("files", []) or [])
+            maybe_file = chat_payload.get("file")
+            if maybe_file is not None:
+                files = [maybe_file]
+        if files:
+            uploaded_image = files[0]
+
+    if uploaded_image is not None:
+        image_bytes = uploaded_image.getvalue()
+        if len(image_bytes) > 5 * 1024 * 1024:
+            st.error("Image is too large. Please upload an image up to 5 MB.")
+        else:
             image_hash = hashlib.md5(image_bytes).hexdigest()
             if st.session_state.image_context_hash != image_hash:
                 try:
@@ -223,72 +238,65 @@ if uploaded_image is not None:
                 else:
                     st.info("Image context is already queued for the next reply.")
 
-if st.session_state.image_context_text:
-    st.caption("Image context (used only for the next reply)")
-    st.text_area(
-        "",
-        value=st.session_state.image_context_text,
-        height=220,
-        disabled=True,
-        key="image_context_preview",
-    )
+    if not prompt:
+        st.info("Please enter a question along with the uploaded image.")
+    else:
+        # 1. Add and display user message
+        with st.chat_message("user"):
+            st.markdown(prompt)
+        st.session_state.messages.append({"role": "user", "content": prompt})
+        save_history()
 
-# User Input
-if prompt := st.chat_input(
-    "Ask a PYQ question and get its solution from your favourite teachers on youtube"
-):
-    # 1. Add and display user message
-    with st.chat_message("user"):
-        st.markdown(prompt)
-    st.session_state.messages.append({"role": "user", "content": prompt})
-    save_history()
-
-    # 2. Generate and display assistant response
-    with st.chat_message("assistant"):
-        with st.spinner("Searching knowledge base..."):
-            try:
-                debug_log(f"Chat page: executing rag.query for session_id={session_id}")
-                retrieval_query = prompt
-                if (
-                    st.session_state.image_context_pending
-                    and st.session_state.image_context_text
-                ):
-                    retrieval_query = (
-                        f"{prompt}\n\n"
-                        "Image context from uploaded question image:\n"
-                        f"{st.session_state.image_context_text}"
+        # 2. Generate and display assistant response
+        with st.chat_message("assistant"):
+            with st.spinner("Searching knowledge base..."):
+                try:
+                    debug_log(
+                        f"Chat page: executing rag.query for session_id={session_id}"
                     )
+                    retrieval_query = prompt
+                    if (
+                        st.session_state.image_context_pending
+                        and st.session_state.image_context_text
+                    ):
+                        retrieval_query = (
+                            f"{prompt}\n\n"
+                            "Image context from uploaded question image:\n"
+                            f"{st.session_state.image_context_text}"
+                        )
 
-                history_pairs = []
-                running_user = None
-                for msg in st.session_state.messages[:-1]:
-                    role = msg.get("role")
-                    text = msg.get("content", "")
-                    if role == "user":
-                        running_user = text
-                    elif role == "assistant" and running_user is not None:
-                        history_pairs.append((running_user, text))
-                        running_user = None
+                    history_pairs = []
+                    running_user = None
+                    for msg in st.session_state.messages[:-1]:
+                        role = msg.get("role")
+                        text = msg.get("content", "")
+                        if role == "user":
+                            running_user = text
+                        elif role == "assistant" and running_user is not None:
+                            history_pairs.append((running_user, text))
+                            running_user = None
 
-                if CHAT_HISTORY_TURNS > 0:
-                    history_pairs = history_pairs[-CHAT_HISTORY_TURNS:]
+                    if CHAT_HISTORY_TURNS > 0:
+                        history_pairs = history_pairs[-CHAT_HISTORY_TURNS:]
 
-                response = rag.query_with_history(
-                    retrieval_query,
-                    chat_history=history_pairs,
-                    top_k=5,
-                    session_id=session_id,
-                    user_id=session_id,
-                )
-                if st.session_state.image_context_pending:
-                    st.session_state.image_context_pending = False
-            except Exception as e:
-                logger.exception("Chat page: rag.query failed")
-                st.error(f"Query failed: {e}")
-                st.code(traceback.format_exc())
-                st.stop()
-            answer = response.get("answer", "No answer generated.")
-            sources = response.get("sources", [])
+                    response = rag.query_with_history(
+                        retrieval_query,
+                        chat_history=history_pairs,
+                        top_k=5,
+                        session_id=session_id,
+                        user_id=session_id,
+                    )
+                    if st.session_state.image_context_pending:
+                        st.session_state.image_context_pending = False
+                except Exception as e:
+                    logger.exception("Chat page: rag.query failed")
+                    response = {
+                        "answer": "Knowledge base is empty or unavailable. Please ingest content first.",
+                        "sources": [],
+                        "error": str(e),
+                    }
+                answer = response.get("answer", "No answer generated.")
+                sources = response.get("sources", [])
 
             st.markdown(answer)
 
