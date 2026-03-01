@@ -40,9 +40,11 @@ updater = AutoUpdater(source_manager, rag)
 try:
     ingestion_queue = IngestionQueue()
     queue_enabled = True
-except Exception:
+    queue_init_error = None
+except Exception as e:
     ingestion_queue = None
     queue_enabled = False
+    queue_init_error = str(e)
 
 
 def true_delete_source(src):
@@ -75,7 +77,7 @@ def true_delete_source(src):
 
 def enqueue_source(src):
     if not (queue_enabled and ingestion_queue):
-        return
+        return False, "Queue is not configured"
 
     s3_uri = None
     s3_transcript_uri = None
@@ -85,14 +87,18 @@ def enqueue_source(src):
         s3_transcript_uri = src.metadata.get("s3_transcript_json_uri")
         src_track_id = src.metadata.get("track_id")
 
-    ingestion_queue.submit_job(
-        src.source_id,
-        src.url,
-        src.source_type,
-        s3_audio_uri=s3_uri,
-        s3_transcript_json_uri=s3_transcript_uri,
-        track_id=src_track_id,
-    )
+    try:
+        ingestion_queue.submit_job(
+            src.source_id,
+            src.url,
+            src.source_type,
+            s3_audio_uri=s3_uri,
+            s3_transcript_json_uri=s3_transcript_uri,
+            track_id=src_track_id,
+        )
+        return True, None
+    except Exception as e:
+        return False, str(e)
 
 
 def recreate_source(src):
@@ -136,6 +142,10 @@ st.title("⚙️ Content Management Admin")
 st.markdown(
     "Use this panel to ingest and manage documents and videos in the RAG vector store."
 )
+if not queue_enabled:
+    st.warning(
+        f"Background queue is unavailable ({queue_init_error}). Actions will run inline and no SQS jobs will be created."
+    )
 
 col1, col2 = st.columns([1, 2])
 
@@ -175,8 +185,15 @@ with col1:
                 if queue_enabled and ingestion_queue:
                     src = source_manager.get_source(source_id)
                     if src:
-                        enqueue_source(src)
-                    st.success("YouTube source added to ingestion queue.")
+                        enqueued, enqueue_err = enqueue_source(src)
+                        if enqueued:
+                            st.success("YouTube source added to ingestion queue.")
+                        else:
+                            st.error(f"Failed to enqueue YouTube source: {enqueue_err}")
+                    else:
+                        st.error(
+                            "Source was created but could not be loaded for queueing."
+                        )
                 else:
                     st.warning("Queue is not configured; source saved as pending.")
 
@@ -313,15 +330,26 @@ with col2:
                 if queue_enabled and ingestion_queue:
                     recreated = 0
                     removed_vectors_total = 0
+                    enqueue_failed = 0
                     for src in sources:
                         ok, new_src, removed_vectors, err = recreate_source(src)
                         if ok and new_src:
-                            enqueue_source(new_src)
-                            recreated += 1
+                            enqueued, enqueue_err = enqueue_source(new_src)
+                            if enqueued:
+                                recreated += 1
+                            else:
+                                enqueue_failed += 1
+                                st.error(
+                                    f"Failed to enqueue recreated source {new_src.source_id}: {enqueue_err}"
+                                )
                             removed_vectors_total += removed_vectors
                     st.success(
                         f"Recreated {recreated} source(s), removed {removed_vectors_total} old vector chunks, and queued ingestion."
                     )
+                    if enqueue_failed:
+                        st.warning(
+                            f"Queueing failed for {enqueue_failed} recreated source(s)."
+                        )
                 else:
                     with st.status(
                         "Recreating all sources...", expanded=True
@@ -440,15 +468,26 @@ with col2:
                 if queue_enabled and ingestion_queue:
                     recreated = 0
                     removed_vectors_total = 0
+                    enqueue_failed = 0
                     for src in error_sources:
                         ok, new_src, removed_vectors, err = recreate_source(src)
                         if ok and new_src:
-                            enqueue_source(new_src)
-                            recreated += 1
+                            enqueued, enqueue_err = enqueue_source(new_src)
+                            if enqueued:
+                                recreated += 1
+                            else:
+                                enqueue_failed += 1
+                                st.error(
+                                    f"Failed to enqueue recreated source {new_src.source_id}: {enqueue_err}"
+                                )
                             removed_vectors_total += removed_vectors
                     st.success(
                         f"Recreated {recreated} failed source(s), removed {removed_vectors_total} old vector chunks, and queued ingestion."
                     )
+                    if enqueue_failed:
+                        st.warning(
+                            f"Queueing failed for {enqueue_failed} failed source(s)."
+                        )
                 else:
                     with st.status(
                         "Recreating failed sources...", expanded=True
@@ -535,11 +574,16 @@ with col2:
                         if queue_enabled and ingestion_queue:
                             ok, new_src, removed_vectors, err = recreate_source(s)
                             if ok and new_src:
-                                enqueue_source(new_src)
-                                st.success(
-                                    f"Source recreated with {removed_vectors} old vector chunks removed and re-queued."
-                                )
-                                st.rerun()
+                                enqueued, enqueue_err = enqueue_source(new_src)
+                                if enqueued:
+                                    st.success(
+                                        f"Source recreated with {removed_vectors} old vector chunks removed and re-queued."
+                                    )
+                                    st.rerun()
+                                else:
+                                    st.error(
+                                        f"Source recreated but failed to queue worker job: {enqueue_err}"
+                                    )
                             else:
                                 st.error(f"Recreate failed: {err}")
                         else:
