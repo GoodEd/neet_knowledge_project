@@ -89,6 +89,10 @@ class NEETRAG:
         if chunked_docs:
             langchain_docs = self._convert_to_langchain_docs(chunked_docs)
 
+            if source_id:
+                for doc in langchain_docs:
+                    doc.metadata["source_id"] = source_id
+
             try:
                 self.vector_manager.load_vectorstore()
                 self.vector_manager.add_documents(langchain_docs)
