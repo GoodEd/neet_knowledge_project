@@ -26,7 +26,11 @@ phases:
                 app.py|pages/*|.streamlit/*|src/utils/ui_helpers.py|deploy/Dockerfile.frontend)
                   BUILD_STREAMLIT=true
                   ;;
-                src/worker.py|src/jobs/*|src/processors/*|src/utils/content_manager.py|deploy/Dockerfile.worker)
+                src/worker.py|src/jobs/*|src/processors/*|deploy/Dockerfile.worker)
+                  BUILD_WORKER=true
+                  ;;
+                src/utils/content_manager.py)
+                  BUILD_STREAMLIT=true
                   BUILD_WORKER=true
                   ;;
                 requirements.txt|src/rag/*|src/utils/config.py|src/rag/*|config.yaml|src/*)
