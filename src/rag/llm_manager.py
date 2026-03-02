@@ -60,11 +60,13 @@ class LLMManager:
     ) -> Dict[str, Any]:
         kwargs: Dict[str, Any] = {}
         headers: Dict[str, str] = {}
+        extra_body: Dict[str, Any] = {}
 
         if session_id:
             sid = str(session_id)[:128]
-            kwargs["session_id"] = sid
             headers["x-session-id"] = sid
+            if self.provider == "openrouter":
+                extra_body["session_id"] = sid
 
         if user_id:
             uid = str(user_id)[:128]
@@ -73,6 +75,9 @@ class LLMManager:
 
         if headers:
             kwargs["extra_headers"] = headers
+
+        if extra_body:
+            kwargs["extra_body"] = extra_body
 
         return kwargs
 
