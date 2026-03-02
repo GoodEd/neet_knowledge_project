@@ -402,7 +402,12 @@ class AutoUpdater:
             else:
                 result = self.rag.content_processor.process(source.url)
 
+            removed_vectors = 0
             if result.get("chunked_documents"):
+                removed_vectors += self.rag.vector_manager.delete_by_source_id(
+                    source_id
+                )
+                removed_vectors += self.rag.vector_manager.delete_by_source(source.url)
                 self.rag.ingest_processed_content(result, source_id=source_id)
 
             self.source_manager.mark_fetched(source_id, success=True)
@@ -411,6 +416,7 @@ class AutoUpdater:
                 "status": "success",
                 "source_id": source_id,
                 "documents_updated": result.get("total_chunks", 0),
+                "old_vectors_removed": removed_vectors,
             }
 
         except Exception as e:
