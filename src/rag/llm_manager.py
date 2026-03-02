@@ -63,7 +63,6 @@ class LLMManager:
 
         if session_id:
             sid = str(session_id)[:128]
-            kwargs["session_id"] = sid
             headers["x-session-id"] = sid
 
         if user_id:
