@@ -1,43 +1,147 @@
 import json
 import os
-from pathlib import Path
+import sqlite3
+import shutil
+import time
+from dataclasses import dataclass
 from datetime import datetime
-from typing import Dict, List, Any, Optional
-from dataclasses import dataclass, asdict
+from typing import Any, Dict, List, Optional
 
 
 @dataclass
 class ContentSource:
     source_id: str
     url: str
-    source_type: str  # youtube, html, pdf, text
+    source_type: str
     title: Optional[str] = None
     last_fetched: Optional[str] = None
     last_updated: Optional[str] = None
     fetch_interval_hours: int = 24
-    status: str = "pending"  # pending, active, error, disabled
+    status: str = "pending"
     error_message: Optional[str] = None
     metadata: Optional[Dict] = None
 
 
 class ContentSourceManager:
-    def __init__(self, storage_path: str = "./data/sources.json"):
-        self.storage_path = storage_path
-        self.sources: Dict[str, ContentSource] = {}
-        self._load()
-
-    def _load(self):
-        if os.path.exists(self.storage_path):
-            with open(self.storage_path, "r") as f:
-                data = json.load(f)
-                for source_id, source_data in data.items():
-                    self.sources[source_id] = ContentSource(**source_data)
-
-    def _save(self):
+    def __init__(self, storage_path: Optional[str] = None):
+        data_dir = os.environ.get("DATA_DIR", "./data")
+        self.storage_path = storage_path or os.path.join(data_dir, "sources.db")
+        self.journal_mode = os.environ.get("SQLITE_JOURNAL_MODE", "DELETE")
         os.makedirs(os.path.dirname(self.storage_path), exist_ok=True)
-        data = {source_id: asdict(src) for source_id, src in self.sources.items()}
-        with open(self.storage_path, "w") as f:
-            json.dump(data, f, indent=2)
+        self.conn = sqlite3.connect(
+            self.storage_path, timeout=30, check_same_thread=False
+        )
+        self.conn.row_factory = sqlite3.Row
+        self._init_db()
+
+    def _reconnect(self):
+        try:
+            self.conn.close()
+        except Exception:
+            pass
+        self.conn = sqlite3.connect(
+            self.storage_path, timeout=30, check_same_thread=False
+        )
+        self.conn.row_factory = sqlite3.Row
+        self._init_db()
+
+    def _recover_malformed_db(self):
+        try:
+            self.conn.close()
+        except Exception:
+            pass
+
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        corrupt_path = f"{self.storage_path}.corrupt.{ts}"
+        if os.path.exists(self.storage_path):
+            shutil.move(self.storage_path, corrupt_path)
+
+        self.conn = sqlite3.connect(
+            self.storage_path, timeout=30, check_same_thread=False
+        )
+        self.conn.row_factory = sqlite3.Row
+        self._init_db()
+
+    def _with_retry(self, fn):
+        last_error = None
+        for _ in range(2):
+            try:
+                return fn()
+            except (sqlite3.OperationalError, sqlite3.DatabaseError) as e:
+                last_error = e
+                err = str(e).lower()
+                if "disk i/o error" in err:
+                    self._reconnect()
+                    continue
+                if "database disk image is malformed" in err:
+                    self._recover_malformed_db()
+                    continue
+                raise
+        if last_error:
+            raise last_error
+
+    def _init_db(self):
+        self.conn.execute("PRAGMA busy_timeout=5000")
+        self._set_journal_mode_safely()
+        self.conn.execute("PRAGMA synchronous=NORMAL")
+        self.conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS sources (
+                source_id TEXT PRIMARY KEY,
+                url TEXT NOT NULL,
+                source_type TEXT NOT NULL,
+                title TEXT,
+                last_fetched TEXT,
+                last_updated TEXT,
+                fetch_interval_hours INTEGER NOT NULL,
+                status TEXT NOT NULL,
+                error_message TEXT,
+                metadata TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+            """
+        )
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_sources_status ON sources(status)"
+        )
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_sources_type ON sources(source_type)"
+        )
+        self.conn.commit()
+
+    def _set_journal_mode_safely(self):
+        for _ in range(4):
+            try:
+                self.conn.execute(f"PRAGMA journal_mode={self.journal_mode}")
+                return
+            except sqlite3.OperationalError as e:
+                if "database is locked" in str(e).lower():
+                    time.sleep(0.5)
+                    continue
+                raise
+
+    def _row_to_source(self, row: sqlite3.Row) -> ContentSource:
+        metadata = row["metadata"]
+        parsed_metadata = None
+        if metadata:
+            try:
+                parsed_metadata = json.loads(metadata)
+            except Exception:
+                parsed_metadata = None
+
+        return ContentSource(
+            source_id=row["source_id"],
+            url=row["url"],
+            source_type=row["source_type"],
+            title=row["title"],
+            last_fetched=row["last_fetched"],
+            last_updated=row["last_updated"],
+            fetch_interval_hours=int(row["fetch_interval_hours"]),
+            status=row["status"],
+            error_message=row["error_message"],
+            metadata=parsed_metadata,
+        )
 
     def add_source(
         self,
@@ -45,62 +149,139 @@ class ContentSourceManager:
         source_type: str,
         title: Optional[str] = None,
         fetch_interval_hours: int = 24,
+        metadata: Optional[Dict] = None,
+        source_key: Optional[str] = None,
     ) -> str:
         import hashlib
 
-        source_id = hashlib.md5(url.encode()).hexdigest()[:12]
+        hash_input = source_key or url
+        source_id = hashlib.md5(hash_input.encode()).hexdigest()[:12]
+        now = datetime.now().isoformat()
+        metadata_json = json.dumps(metadata) if metadata is not None else None
 
-        self.sources[source_id] = ContentSource(
-            source_id=source_id,
-            url=url,
-            source_type=source_type,
-            title=title or url,
-            fetch_interval_hours=fetch_interval_hours,
-            status="pending",
+        self.conn.execute(
+            """
+            INSERT OR REPLACE INTO sources (
+                source_id, url, source_type, title, last_fetched, last_updated,
+                fetch_interval_hours, status, error_message, metadata, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                source_id,
+                url,
+                source_type,
+                title or url,
+                None,
+                None,
+                int(fetch_interval_hours),
+                "pending",
+                None,
+                metadata_json,
+                now,
+                now,
+            ),
         )
-        self._save()
+        self.conn.commit()
         return source_id
 
     def add_youtube(
-        self, url: str, title: Optional[str] = None, fetch_interval_hours: int = 24
+        self,
+        url: str,
+        title: Optional[str] = None,
+        fetch_interval_hours: int = 24,
+        metadata: Optional[Dict] = None,
     ) -> str:
-        return self.add_source(url, "youtube", title, fetch_interval_hours)
+        track_id = None
+        if metadata and isinstance(metadata, dict):
+            track_id = metadata.get("track_id")
+        source_key = f"{url}::{track_id}" if track_id else url
+        return self.add_source(
+            url,
+            "youtube",
+            title,
+            fetch_interval_hours,
+            metadata,
+            source_key=source_key,
+        )
 
     def add_html(
         self, url: str, title: Optional[str] = None, fetch_interval_hours: int = 24
     ) -> str:
         return self.add_source(url, "html", title, fetch_interval_hours)
 
-    def add_pdf(self, file_path: str, title: Optional[str] = None) -> str:
-        return self.add_source(file_path, "pdf", title, fetch_interval_hours=0)
+    def add_pdf(
+        self,
+        file_path: str,
+        title: Optional[str] = None,
+        metadata: Optional[Dict] = None,
+    ) -> str:
+        return self.add_source(
+            file_path, "pdf", title, fetch_interval_hours=0, metadata=metadata
+        )
+
+    def add_csv(
+        self,
+        file_path: str,
+        title: Optional[str] = None,
+        metadata: Optional[Dict] = None,
+    ) -> str:
+        return self.add_source(
+            file_path, "csv", title, fetch_interval_hours=0, metadata=metadata
+        )
 
     def remove_source(self, source_id: str) -> bool:
-        if source_id in self.sources:
-            del self.sources[source_id]
-            self._save()
-            return True
-        return False
+        cur = self._with_retry(
+            lambda: self.conn.execute(
+                "DELETE FROM sources WHERE source_id = ?", (source_id,)
+            )
+        )
+        self.conn.commit()
+        return bool(cur and cur.rowcount > 0)
 
     def get_source(self, source_id: str) -> Optional[ContentSource]:
-        return self.sources.get(source_id)
+        row = self._with_retry(
+            lambda: self.conn.execute(
+                "SELECT * FROM sources WHERE source_id = ?", (source_id,)
+            ).fetchone()
+        )
+        if not row:
+            return None
+        return self._row_to_source(row)
 
     def get_all_sources(self, source_type: Optional[str] = None) -> List[ContentSource]:
-        sources = list(self.sources.values())
         if source_type:
-            sources = [s for s in sources if s.source_type == source_type]
-        return sources
+            rows = (
+                self._with_retry(
+                    lambda: self.conn.execute(
+                        "SELECT * FROM sources WHERE source_type = ? ORDER BY updated_at DESC",
+                        (source_type,),
+                    ).fetchall()
+                )
+                or []
+            )
+        else:
+            rows = (
+                self._with_retry(
+                    lambda: self.conn.execute(
+                        "SELECT * FROM sources ORDER BY updated_at DESC"
+                    ).fetchall()
+                )
+                or []
+            )
+        return [self._row_to_source(r) for r in rows]
 
     def get_sources_needing_update(self) -> List[ContentSource]:
         from datetime import timedelta
 
-        sources = []
         now = datetime.now()
+        candidates = self.get_all_sources()
+        sources = []
 
-        for source in self.sources.values():
+        for source in candidates:
             if source.status == "disabled":
                 continue
             if source.source_type == "pdf":
-                continue  # PDFs are static
+                continue
 
             if source.last_fetched:
                 last_fetch = datetime.fromisoformat(source.last_fetched)
@@ -115,44 +296,73 @@ class ContentSourceManager:
     def mark_fetched(
         self, source_id: str, success: bool = True, error: Optional[str] = None
     ):
-        if source_id in self.sources:
-            self.sources[source_id].last_fetched = datetime.now().isoformat()
-            if success:
-                self.sources[source_id].status = "active"
-                self.sources[source_id].last_updated = datetime.now().isoformat()
-                self.sources[source_id].error_message = None
-            else:
-                self.sources[source_id].status = "error"
-                self.sources[source_id].error_message = error
-            self._save()
+        now = datetime.now().isoformat()
+        if success:
+            self._with_retry(
+                lambda: self.conn.execute(
+                    """
+                    UPDATE sources
+                    SET last_fetched = ?, last_updated = ?, status = 'active', error_message = NULL, updated_at = ?
+                    WHERE source_id = ?
+                    """,
+                    (now, now, now, source_id),
+                )
+            )
+        else:
+            self._with_retry(
+                lambda: self.conn.execute(
+                    """
+                    UPDATE sources
+                    SET last_fetched = ?, status = 'error', error_message = ?, updated_at = ?
+                    WHERE source_id = ?
+                    """,
+                    (now, error, now, source_id),
+                )
+            )
+        self.conn.commit()
 
     def update_interval(self, source_id: str, hours: int):
-        if source_id in self.sources:
-            self.sources[source_id].fetch_interval_hours = hours
-            self._save()
+        self.conn.execute(
+            "UPDATE sources SET fetch_interval_hours = ?, updated_at = ? WHERE source_id = ?",
+            (int(hours), datetime.now().isoformat(), source_id),
+        )
+        self.conn.commit()
 
     def toggle_source(self, source_id: str, enabled: bool):
-        if source_id in self.sources:
-            self.sources[source_id].status = "active" if enabled else "disabled"
-            self._save()
+        status = "active" if enabled else "disabled"
+        self.conn.execute(
+            "UPDATE sources SET status = ?, updated_at = ? WHERE source_id = ?",
+            (status, datetime.now().isoformat(), source_id),
+        )
+        self.conn.commit()
+
+    def set_source_metadata(self, source_id: str, metadata: Dict[str, Any]):
+        self._with_retry(
+            lambda: self.conn.execute(
+                "UPDATE sources SET metadata = ?, updated_at = ? WHERE source_id = ?",
+                (json.dumps(metadata), datetime.now().isoformat(), source_id),
+            )
+        )
+        self.conn.commit()
 
     def get_stats(self) -> Dict[str, Any]:
-        stats = {
-            "total": len(self.sources),
-            "by_type": {},
-            "by_status": {},
+        rows_type = self.conn.execute(
+            "SELECT source_type, COUNT(1) AS c FROM sources GROUP BY source_type"
+        ).fetchall()
+        rows_status = self.conn.execute(
+            "SELECT status, COUNT(1) AS c FROM sources GROUP BY status"
+        ).fetchall()
+        total = self.conn.execute("SELECT COUNT(1) AS c FROM sources").fetchone()
+
+        by_type = {r["source_type"]: int(r["c"]) for r in rows_type}
+        by_status = {r["status"]: int(r["c"]) for r in rows_status}
+
+        return {
+            "total": int(total["c"]) if total else 0,
+            "by_type": by_type,
+            "by_status": by_status,
             "needs_update": len(self.get_sources_needing_update()),
         }
-
-        for source in self.sources.values():
-            stats["by_type"][source.source_type] = (
-                stats["by_type"].get(source.source_type, 0) + 1
-            )
-            stats["by_status"][source.status] = (
-                stats["by_status"].get(source.status, 0) + 1
-            )
-
-        return stats
 
 
 class AutoUpdater:
@@ -167,7 +377,22 @@ class AutoUpdater:
 
         try:
             if source.source_type == "youtube":
-                result = self.rag.content_processor.process_youtube(source.url)
+                s3_audio_uri = None
+                s3_transcript_json_uri = None
+                track_id = None
+                if source.metadata and isinstance(source.metadata, dict):
+                    s3_audio_uri = source.metadata.get("s3_audio_uri")
+                    s3_transcript_json_uri = source.metadata.get(
+                        "s3_transcript_json_uri"
+                    )
+                    track_id = source.metadata.get("track_id")
+                result = self.rag.content_processor.process_youtube(
+                    source.url,
+                    s3_audio_uri=s3_audio_uri,
+                    s3_transcript_json_uri=s3_transcript_json_uri,
+                    track_id=track_id,
+                    video_title=source.title,
+                )
             elif source.source_type == "html":
                 result = self.rag.content_processor.process_html_content(
                     self._fetch_html(source.url), source.url
@@ -177,9 +402,13 @@ class AutoUpdater:
             else:
                 result = self.rag.content_processor.process(source.url)
 
-            # Re-ingest to vector store
+            removed_vectors = 0
             if result.get("chunked_documents"):
-                self.rag.ingest_processed_content(result)
+                removed_vectors += self.rag.vector_manager.delete_by_source_id(
+                    source_id
+                )
+                removed_vectors += self.rag.vector_manager.delete_by_source(source.url)
+                self.rag.ingest_processed_content(result, source_id=source_id)
 
             self.source_manager.mark_fetched(source_id, success=True)
 
@@ -187,6 +416,7 @@ class AutoUpdater:
                 "status": "success",
                 "source_id": source_id,
                 "documents_updated": result.get("total_chunks", 0),
+                "old_vectors_removed": removed_vectors,
             }
 
         except Exception as e:

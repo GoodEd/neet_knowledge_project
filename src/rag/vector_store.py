@@ -1,5 +1,7 @@
 from typing import Dict, Any, List, Optional
 from pathlib import Path
+import contextlib
+import io
 import os
 
 from langchain_core.documents import Document
@@ -12,12 +14,14 @@ from langchain_openai import OpenAIEmbeddings
 class VectorStoreManager:
     def __init__(
         self,
-        persist_directory: str = "./data/faiss_index",
+        persist_directory: str = None,
         embedding_provider: str = "huggingface",
         embedding_model: str = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
         embedding_dimension: int = 384,
     ):
-        self.persist_directory = persist_directory
+        self.persist_directory = persist_directory or os.path.join(
+            os.environ.get("DATA_DIR", "./data"), "faiss_index"
+        )
         self.embedding_provider = embedding_provider
         self.embedding_model = embedding_model
         self.embedding_dimension = embedding_dimension
@@ -28,11 +32,21 @@ class VectorStoreManager:
 
     def _initialize_embeddings(self):
         if self.embedding_provider == "huggingface":
-            self.embeddings = HuggingFaceEmbeddings(
-                model_name=self.embedding_model,
-                model_kwargs={"device": "cpu"},
-                encode_kwargs={"normalize_embeddings": True},
-            )
+            os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
+            os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
+
+            def _build_hf_embeddings() -> HuggingFaceEmbeddings:
+                return HuggingFaceEmbeddings(
+                    model_name=self.embedding_model,
+                    model_kwargs={"device": "cpu"},
+                    encode_kwargs={"normalize_embeddings": True},
+                )
+
+            try:
+                self.embeddings = _build_hf_embeddings()
+            except BrokenPipeError:
+                with contextlib.redirect_stderr(io.StringIO()):
+                    self.embeddings = _build_hf_embeddings()
         elif self.embedding_provider == "openai":
             self.embeddings = OpenAIEmbeddings(
                 model="text-embedding-3-small", api_key=os.getenv("OPENAI_API_KEY")
@@ -108,6 +122,110 @@ class VectorStoreManager:
             import shutil
 
             shutil.rmtree(self.persist_directory)
+
+    def delete_by_source(self, source: str, track_id: Optional[str] = None) -> int:
+        return self._delete_by_metadata_key(
+            metadata_key="source",
+            metadata_value=source,
+            track_id=track_id,
+            include_trackless_when_track_set=True,
+        )
+
+    def delete_by_source_id(
+        self, source_id: str, track_id: Optional[str] = None
+    ) -> int:
+        return self._delete_by_metadata_key(
+            metadata_key="source_id",
+            metadata_value=source_id,
+            track_id=track_id,
+            include_trackless_when_track_set=False,
+        )
+
+    def delete_by_source_id_and_question_id(
+        self, source_id: str, question_id: str
+    ) -> int:
+        if not os.path.exists(self.persist_directory):
+            return 0
+
+        if self.vectorstore is None:
+            self.load_vectorstore()
+
+        doc_map = getattr(self.vectorstore.docstore, "_dict", {})
+        all_docs = [doc for doc in doc_map.values() if isinstance(doc, Document)]
+
+        keep_docs: List[Document] = []
+        removed = 0
+        for doc in all_docs:
+            same_source_id = doc.metadata.get("source_id") == source_id
+            same_question_id = str(doc.metadata.get("question_id", "")) == str(
+                question_id
+            )
+            if same_source_id and same_question_id:
+                removed += 1
+            else:
+                keep_docs.append(doc)
+
+        if removed == 0:
+            return 0
+
+        if keep_docs:
+            self.vectorstore = FAISS.from_documents(
+                documents=keep_docs,
+                embedding=self.embeddings,
+            )
+            self.vectorstore.save_local(self.persist_directory)
+        else:
+            self.delete_collection()
+            self.vectorstore = None
+
+        return removed
+
+    def _delete_by_metadata_key(
+        self,
+        metadata_key: str,
+        metadata_value: str,
+        track_id: Optional[str],
+        include_trackless_when_track_set: bool,
+    ) -> int:
+        if not os.path.exists(self.persist_directory):
+            return 0
+
+        if self.vectorstore is None:
+            self.load_vectorstore()
+
+        doc_map = getattr(self.vectorstore.docstore, "_dict", {})
+        all_docs = [doc for doc in doc_map.values() if isinstance(doc, Document)]
+
+        keep_docs: List[Document] = []
+        removed = 0
+        for doc in all_docs:
+            same_source = doc.metadata.get(metadata_key) == metadata_value
+            doc_track_id = doc.metadata.get("track_id")
+            same_track = track_id is None or doc_track_id == track_id
+            legacy_trackless_match = (
+                include_trackless_when_track_set
+                and track_id is not None
+                and not doc_track_id
+            )
+            if same_source and (same_track or legacy_trackless_match):
+                removed += 1
+            else:
+                keep_docs.append(doc)
+
+        if removed == 0:
+            return 0
+
+        if keep_docs:
+            self.vectorstore = FAISS.from_documents(
+                documents=keep_docs,
+                embedding=self.embeddings,
+            )
+            self.vectorstore.save_local(self.persist_directory)
+        else:
+            self.delete_collection()
+            self.vectorstore = None
+
+        return removed
 
     def get_collection_info(self) -> Dict[str, Any]:
         if self.vectorstore is None:

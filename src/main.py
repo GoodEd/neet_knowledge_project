@@ -7,6 +7,7 @@ Usage: python -m src.main [command] [options]
 import sys
 import os
 import argparse
+from pathlib import Path
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -21,6 +22,7 @@ def cmd_ingest(args):
         persist_directory=args.persist_dir,
         embedding_provider=args.embedding_provider,
         embedding_model=args.embedding_model,
+        index_name=args.index_name,
         llm_provider=args.llm_provider,
         llm_model=args.llm_model,
         llm_base_url=args.llm_base_url,
@@ -51,6 +53,7 @@ def cmd_query(args):
         persist_directory=args.persist_dir,
         embedding_provider=args.embedding_provider,
         embedding_model=args.embedding_model,
+        index_name=args.index_name,
         llm_provider=args.llm_provider,
         llm_model=args.llm_model,
         llm_base_url=args.llm_base_url,
@@ -84,7 +87,12 @@ def cmd_query(args):
 def cmd_stats(args):
     from src.rag import NEETRAG
 
-    rag = NEETRAG(persist_directory=args.persist_dir)
+    rag = NEETRAG(
+        persist_directory=args.persist_dir,
+        embedding_provider=args.embedding_provider,
+        embedding_model=args.embedding_model,
+        index_name=args.index_name,
+    )
     stats = rag.get_stats()
 
     print("NEET RAG Statistics:")
@@ -112,6 +120,7 @@ def cmd_interactive(args):
         persist_directory=args.persist_dir,
         embedding_provider=args.embedding_provider,
         embedding_model=args.embedding_model,
+        index_name=args.index_name,
         llm_provider=args.llm_provider,
         llm_model=args.llm_model,
         llm_base_url=args.llm_base_url,
@@ -205,6 +214,7 @@ def cmd_source_update(args):
         persist_directory=args.persist_dir,
         embedding_provider=args.embedding_provider,
         embedding_model=args.embedding_model,
+        index_name=args.index_name,
         llm_provider=args.llm_provider,
         llm_model=args.llm_model,
         llm_base_url=args.llm_base_url,
@@ -231,13 +241,122 @@ def cmd_source_remove(args):
         print(f"Source not found: {args.source_id}")
 
 
+def cmd_index(args):
+    from src.rag.index_registry import (
+        active_index_file,
+        get_active_index,
+        index_root,
+        resolve_index_directory,
+        set_active_index,
+    )
+
+    data_dir = os.environ.get("DATA_DIR", "./data")
+    if args.index_command == "show":
+        active = get_active_index(data_dir=data_dir)
+        if not active:
+            print("No active index configured yet.")
+            print(f"Active file: {active_index_file(data_dir)}")
+            return
+        print("Active index:")
+        print(active)
+        return
+
+    if args.index_command == "list":
+        root = Path(index_root(data_dir))
+        if not root.exists():
+            print(f"No index root found at {root}")
+            return
+        print(f"Index root: {root}")
+        for p in sorted(root.glob("*/*/*")):
+            if (p / "index.faiss").exists() and (p / "index.pkl").exists():
+                print(f"- {p}")
+        return
+
+    if args.index_command == "activate":
+        payload = set_active_index(
+            embedding_provider=args.embedding_provider,
+            embedding_model=args.embedding_model,
+            index_name=args.index_name,
+            data_dir=data_dir,
+        )
+        print("Active index updated:")
+        print(payload)
+        return
+
+    print("Unknown index command")
+
+
+def cmd_reindex(args):
+    from langchain_core.documents import Document
+    from src.rag.index_registry import resolve_runtime_index, set_active_index
+    from src.rag.vector_store import VectorStoreManager
+
+    data_dir = os.environ.get("DATA_DIR", "./data")
+
+    src_provider, src_model, src_dir = resolve_runtime_index(
+        embedding_provider=args.source_embedding_provider,
+        embedding_model=args.source_embedding_model,
+        persist_directory=args.source_persist_dir,
+        index_name=args.source_index_name,
+        data_dir=data_dir,
+    )
+    dst_provider, dst_model, dst_dir = resolve_runtime_index(
+        embedding_provider=args.target_embedding_provider,
+        embedding_model=args.target_embedding_model,
+        persist_directory=args.target_persist_dir,
+        index_name=args.target_index_name,
+        data_dir=data_dir,
+    )
+
+    src_store = VectorStoreManager(
+        persist_directory=src_dir,
+        embedding_provider=src_provider,
+        embedding_model=src_model,
+    )
+    src_store.load_vectorstore()
+
+    doc_map = getattr(src_store.vectorstore.docstore, "_dict", {})
+    docs = [doc for doc in doc_map.values() if isinstance(doc, Document)]
+    if not docs:
+        print("No documents found in source index; aborting reindex.")
+        return
+
+    dst_store = VectorStoreManager(
+        persist_directory=dst_dir,
+        embedding_provider=dst_provider,
+        embedding_model=dst_model,
+    )
+    dst_store.create_vectorstore(docs)
+
+    print(f"Reindexed {len(docs)} docs")
+    print(f"Source: {src_dir} ({src_provider} / {src_model})")
+    print(f"Target: {dst_dir} ({dst_provider} / {dst_model})")
+
+    if args.activate:
+        active = set_active_index(
+            embedding_provider=dst_provider,
+            embedding_model=dst_model,
+            index_name=args.target_index_name,
+            data_dir=data_dir,
+        )
+        print("Activated target index:")
+        print(active)
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="NEET Knowledge RAG - Multi-format content RAG system"
     )
 
     parser.add_argument(
-        "--persist-dir", default="./data/faiss_index", help="Vector database directory"
+        "--persist-dir",
+        default=None,
+        help="Vector database directory (optional; if omitted, active/index-derived path is used)",
+    )
+    parser.add_argument(
+        "--index-name",
+        default=None,
+        help="Logical index name under faiss_indexes/<provider>/<model>/<index_name>",
     )
     parser.add_argument(
         "--embedding-provider",
@@ -318,6 +437,84 @@ def main():
     )
     remove_parser.add_argument("source_id", help="Source ID to remove")
 
+    index_parser = subparsers.add_parser("index", help="Manage multi-index selection")
+    index_subparsers = index_parser.add_subparsers(
+        dest="index_command", help="Index commands"
+    )
+
+    index_subparsers.add_parser("show", help="Show current active index")
+    index_subparsers.add_parser("list", help="List discovered FAISS indexes")
+    activate_parser = index_subparsers.add_parser(
+        "activate", help="Set active index for runtime"
+    )
+    activate_parser.add_argument(
+        "--embedding-provider",
+        required=True,
+        choices=["huggingface", "openai", "fake"],
+        help="Embedding provider for active index",
+    )
+    activate_parser.add_argument(
+        "--embedding-model",
+        required=True,
+        help="Embedding model for active index",
+    )
+    activate_parser.add_argument(
+        "--index-name",
+        default=None,
+        help="Optional logical index name",
+    )
+
+    reindex_parser = subparsers.add_parser(
+        "reindex", help="Rebuild a new index from documents in an existing index"
+    )
+    reindex_parser.add_argument(
+        "--source-persist-dir",
+        default=None,
+        help="Source index directory (optional)",
+    )
+    reindex_parser.add_argument(
+        "--source-index-name",
+        default=None,
+        help="Source index logical name (uses active if omitted)",
+    )
+    reindex_parser.add_argument(
+        "--source-embedding-provider",
+        default="huggingface",
+        choices=["huggingface", "openai", "fake"],
+        help="Source embedding provider",
+    )
+    reindex_parser.add_argument(
+        "--source-embedding-model",
+        default="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+        help="Source embedding model",
+    )
+    reindex_parser.add_argument(
+        "--target-persist-dir",
+        default=None,
+        help="Target index directory (optional)",
+    )
+    reindex_parser.add_argument(
+        "--target-index-name",
+        default=None,
+        help="Target logical index name",
+    )
+    reindex_parser.add_argument(
+        "--target-embedding-provider",
+        required=True,
+        choices=["huggingface", "openai", "fake"],
+        help="Target embedding provider",
+    )
+    reindex_parser.add_argument(
+        "--target-embedding-model",
+        required=True,
+        help="Target embedding model",
+    )
+    reindex_parser.add_argument(
+        "--activate",
+        action="store_true",
+        help="Activate target index after reindex completes",
+    )
+
     args = parser.parse_args()
 
     if args.command == "ingest":
@@ -339,6 +536,10 @@ def main():
             cmd_source_remove(args)
         else:
             source_parser.print_help()
+    elif args.command == "index":
+        cmd_index(args)
+    elif args.command == "reindex":
+        cmd_reindex(args)
     else:
         parser.print_help()
 

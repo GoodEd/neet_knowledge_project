@@ -102,36 +102,6 @@ class VideoProcessor:
         except Exception as e:
             raise RuntimeError(f"Error processing video: {str(e)}")
 
-    def extract_audio(self, file_path: str, output_path: str = None) -> str:
-        file_path_obj = Path(file_path)
-
-        if not file_path_obj.exists():
-            raise FileNotFoundError(f"Video file not found: {file_path}")
-
-        if output_path is None:
-            output_path = str(file_path_obj.with_suffix(".wav"))
-
-        try:
-            subprocess.run(
-                [
-                    "ffmpeg",
-                    "-i",
-                    str(file_path),
-                    "-vn",
-                    "-acodec",
-                    "pcm_s16le",
-                    "-ar",
-                    "16000",
-                    "-ac",
-                    "1",
-                    output_path,
-                    "-y",
-                ],
-                capture_output=True,
-                check=True,
-                timeout=300,
-            )
-            return output_path
         except subprocess.CalledProcessError as e:
             raise RuntimeError(f"Error extracting audio: {str(e)}")
         except FileNotFoundError:

@@ -25,7 +25,7 @@ class Config:
 
     def _default_config(self) -> Dict[str, Any]:
         return {
-            "vector_db": {"type": "faiss", "persist_dir": "./data/faiss_index"},
+            "vector_db": {"type": "faiss", "persist_dir": os.path.join(os.environ.get("DATA_DIR", "./data"), "faiss_index")},
             "embedding": {
                 "provider": "huggingface",
                 "model": "sentence-transformers/all-MiniLM-L6-v2",
@@ -36,7 +36,7 @@ class Config:
             "rag": {"retrieval_top_k": 5, "similarity_threshold": 0.7},
             "paths": {
                 "data_dir": "./data",
-                "content_dir": "./data/content",
+                "content_dir": os.path.join(os.environ.get("DATA_DIR", "./data"), "content"),
                 "test_data_dir": "./tests/test_data",
             },
         }
@@ -57,7 +57,7 @@ class Config:
 
     @property
     def persist_dir(self) -> str:
-        return self.get("vector_db.persist_dir", "./data/faiss_index")
+        return self.get("vector_db.persist_dir", os.path.join(os.environ.get("DATA_DIR", "./data"), "faiss_index"))
 
     @property
     def embedding_provider(self) -> str:
@@ -65,7 +65,10 @@ class Config:
 
     @property
     def embedding_model(self) -> str:
-        return self.get("embedding.model", "sentence-transformers/all-MiniLM-L6-v2")
+        return self.get(
+            "embedding.model",
+            "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+        )
 
     @property
     def embedding_dimension(self) -> int:
@@ -81,11 +84,11 @@ class Config:
 
     @property
     def chunk_size(self) -> int:
-        return self.get("processing.chunk_size", 1000)
+        return self.get("processing.chunk_size", 400)
 
     @property
     def chunk_overlap(self) -> int:
-        return self.get("processing.chunk_overlap", 200)
+        return self.get("processing.chunk_overlap", 80)
 
     @property
     def retrieval_top_k(self) -> int:
@@ -101,7 +104,7 @@ class Config:
 
     @property
     def content_dir(self) -> str:
-        return self.get("paths.content_dir", "./data/content")
+        return self.get("paths.content_dir", os.path.join(os.environ.get("DATA_DIR", "./data"), "content"))
 
 
 config = Config()

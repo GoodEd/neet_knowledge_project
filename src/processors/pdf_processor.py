@@ -98,26 +98,6 @@ class PDFProcessor:
 
         return None
 
-    def extract_metadata(self, file_path: str) -> Dict[str, Any]:
-        self._import_dependencies()
-
-        file_path = Path(file_path)
-        try:
-            doc = self._pymupdf.open(str(file_path))
-            metadata = doc.metadata
-            page_count = len(doc)
-            doc.close()
-
-            return {
-                "title": metadata.get("title", ""),
-                "author": metadata.get("author", ""),
-                "subject": metadata.get("subject", ""),
-                "pages": page_count,
-                "file_size": file_path.stat().st_size,
-            }
-        except Exception as e:
-            return {"error": str(e)}
-
 
 class DocumentChunker:
     def __init__(self, chunk_size: int = 1000, chunk_overlap: int = 200):

@@ -141,54 +141,69 @@ NEET_2025_VIDEOS = [
     },
 ]
 
-CHUNK_SIZE = 1000
+from src.utils.config import Config
+config = Config()
+CHUNK_SIZE = config.chunk_size
+CHUNK_OVERLAP = config.chunk_overlap
+
 
 
 def transcript_to_documents(snippets, video_id, title, channel):
     url = f"https://www.youtube.com/watch?v={video_id}"
     documents = []
-    current_texts = []
-    current_start = snippets[0].start if snippets else 0
-    current_chars = 0
+    
+    if not snippets:
+        return documents
 
-    for snippet in snippets:
-        current_texts.append(snippet.text)
-        current_chars += len(snippet.text)
-
-        if current_chars >= CHUNK_SIZE:
-            doc = Document(
-                page_content=" ".join(current_texts),
-                metadata={
-                    "source": url,
-                    "video_id": video_id,
-                    "title": title,
-                    "channel": channel,
-                    "start_time": current_start,
-                    "source_type": "youtube",
-                    "exam": "NEET 2025",
-                    "url": url,
-                },
-            )
-            documents.append(doc)
-            current_texts = []
-            current_start = snippet.start
-            current_chars = 0
-
-    if current_texts:
+    i = 0
+    while i < len(snippets):
+        chunk_text_parts = []
+        chunk_start_time = snippets[i].start
+        chunk_length = 0
+        
+        j = i
+        while j < len(snippets):
+            text = snippets[j].text
+            text_len = len(text)
+            
+            if chunk_length + text_len > CHUNK_SIZE and chunk_text_parts:
+                break
+                
+            chunk_text_parts.append(text)
+            chunk_length += text_len
+            j += 1
+            
+        chunk_text = " ".join(chunk_text_parts)
         doc = Document(
-            page_content=" ".join(current_texts),
+            page_content=chunk_text,
             metadata={
                 "source": url,
                 "video_id": video_id,
                 "title": title,
                 "channel": channel,
-                "start_time": current_start,
+                "start_time": chunk_start_time,
                 "source_type": "youtube",
                 "exam": "NEET 2025",
                 "url": url,
             },
         )
         documents.append(doc)
+        
+        if j == len(snippets):
+            break
+            
+        chars_to_advance = max(1, chunk_length - CHUNK_OVERLAP)
+        advanced_chars = 0
+        next_i = i
+        
+        while next_i < j and advanced_chars < chars_to_advance:
+            advanced_chars += len(snippets[next_i].text)
+            next_i += 1
+            
+        if next_i == i:
+            next_i += 1
+            
+        i = next_i
 
     return documents
 
