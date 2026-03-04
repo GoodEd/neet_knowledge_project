@@ -1,0 +1,94 @@
+version: 0.2
+
+phases:
+  pre_build:
+    commands:
+      - echo Logging in to Amazon ECR...
+      - aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com
+      - echo Login successful
+      - REPOSITORY_URI_STREAMLIT=$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/$IMAGE_REPO_NAME_STREAMLIT
+      - REPOSITORY_URI_WORKER=$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/$IMAGE_REPO_NAME_WORKER
+      - COMMIT_HASH=$(echo $CODEBUILD_RESOLVED_SOURCE_VERSION | cut -c 1-7)
+      - IMAGE_TAG=${COMMIT_HASH:=latest}
+      - ECS_CLUSTER_NAME=${ECS_CLUSTER_NAME:-np-pgrest}
+      - ECS_SERVICE_STREAMLIT=${ECS_SERVICE_STREAMLIT:-neet-knowledge-dev-streamlit}
+      - ECS_SERVICE_WORKER=${ECS_SERVICE_WORKER:-neet-knowledge-dev-worker}
+      - BUILD_STREAMLIT=true
+      - BUILD_WORKER=true
+      - |
+        if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+          CHANGED_FILES=$(git diff-tree --no-commit-id --name-only -r "$CODEBUILD_RESOLVED_SOURCE_VERSION" 2>/dev/null || true)
+          if [ -n "$CHANGED_FILES" ]; then
+            BUILD_STREAMLIT=false
+            BUILD_WORKER=false
+            for f in $CHANGED_FILES; do
+              case "$f" in
+                app.py|pages/*|.streamlit/*|src/utils/ui_helpers.py|deploy/Dockerfile.frontend)
+                  BUILD_STREAMLIT=true
+                  ;;
+                src/worker.py|src/jobs/*|src/processors/*|deploy/Dockerfile.worker)
+                  BUILD_WORKER=true
+                  ;;
+                src/utils/content_manager.py)
+                  BUILD_STREAMLIT=true
+                  BUILD_WORKER=true
+                  ;;
+                requirements.txt|src/rag/*|src/utils/config.py|src/rag/*|config.yaml|src/*)
+                  BUILD_STREAMLIT=true
+                  BUILD_WORKER=true
+                  ;;
+                *)
+                  ;;
+              esac
+            done
+            if [ "$BUILD_STREAMLIT" = "false" ] && [ "$BUILD_WORKER" = "false" ]; then
+              BUILD_STREAMLIT=true
+              BUILD_WORKER=true
+            fi
+          fi
+        fi
+      - echo "Build decisions -> streamlit=$BUILD_STREAMLIT worker=$BUILD_WORKER"
+
+      - CURRENT_STREAMLIT_IMAGE=$(aws ecs describe-task-definition --task-definition $(aws ecs describe-services --cluster $ECS_CLUSTER_NAME --services $ECS_SERVICE_STREAMLIT --region $AWS_DEFAULT_REGION --query 'services[0].taskDefinition' --output text) --region $AWS_DEFAULT_REGION --query 'taskDefinition.containerDefinitions[?name==`streamlit`].image' --output text)
+      - CURRENT_WORKER_IMAGE=$(aws ecs describe-task-definition --task-definition $(aws ecs describe-services --cluster $ECS_CLUSTER_NAME --services $ECS_SERVICE_WORKER --region $AWS_DEFAULT_REGION --query 'services[0].taskDefinition' --output text) --region $AWS_DEFAULT_REGION --query 'taskDefinition.containerDefinitions[?name==`worker`].image' --output text)
+  build:
+    commands:
+      - echo Build started on `date`
+      - echo Building the Docker images...
+      - |
+        if [ "$BUILD_STREAMLIT" = "true" ]; then
+          docker build -t $REPOSITORY_URI_STREAMLIT:latest -f deploy/Dockerfile.frontend .
+          docker tag $REPOSITORY_URI_STREAMLIT:latest $REPOSITORY_URI_STREAMLIT:$IMAGE_TAG
+        fi
+      - |
+        if [ "$BUILD_WORKER" = "true" ]; then
+          docker build -t $REPOSITORY_URI_WORKER:latest -f deploy/Dockerfile.worker .
+          docker tag $REPOSITORY_URI_WORKER:latest $REPOSITORY_URI_WORKER:$IMAGE_TAG
+        fi
+  post_build:
+    commands:
+      - echo Build completed on `date`
+      - echo Pushing the Docker images...
+      - |
+        if [ "$BUILD_STREAMLIT" = "true" ]; then
+          docker push $REPOSITORY_URI_STREAMLIT:latest
+          docker push $REPOSITORY_URI_STREAMLIT:$IMAGE_TAG
+          FINAL_STREAMLIT_IMAGE=$REPOSITORY_URI_STREAMLIT:$IMAGE_TAG
+        else
+          FINAL_STREAMLIT_IMAGE=$CURRENT_STREAMLIT_IMAGE
+        fi
+      - |
+        if [ "$BUILD_WORKER" = "true" ]; then
+          docker push $REPOSITORY_URI_WORKER:latest
+          docker push $REPOSITORY_URI_WORKER:$IMAGE_TAG
+          FINAL_WORKER_IMAGE=$REPOSITORY_URI_WORKER:$IMAGE_TAG
+        else
+          FINAL_WORKER_IMAGE=$CURRENT_WORKER_IMAGE
+        fi
+      - echo Writing image definitions file...
+      - printf '[{"name":"streamlit","imageUri":"%s"}]' $FINAL_STREAMLIT_IMAGE > imagedefinitions_streamlit.json
+      - printf '[{"name":"worker","imageUri":"%s"}]' $FINAL_WORKER_IMAGE > imagedefinitions_worker.json
+artifacts:
+  files:
+    - imagedefinitions_streamlit.json
+    - imagedefinitions_worker.json

@@ -7,7 +7,7 @@ vector_db:
 # Embedding Settings
 embedding:
   provider: huggingface  # huggingface, openai
-  model: sentence-transformers/all-MiniLM-L6-v2  # Free model
+  model: sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2
   dimension: 384
 
 # LLM Settings
@@ -18,8 +18,8 @@ llm:
 
 # Processing Settings
 processing:
-  chunk_size: 1000
-  chunk_overlap: 200
+  chunk_size: 400    # Reduced to 400 for 128-token limit of multilingual model
+  chunk_overlap: 80  # ~20% overlap
 
 # Supported Content Types
 supported_types:
@@ -41,7 +41,7 @@ content:
 # RAG Settings
 rag:
   retrieval_top_k: 5
-  similarity_threshold: 0.7
+  similarity_threshold: 0.5
 
 # Paths
 paths:

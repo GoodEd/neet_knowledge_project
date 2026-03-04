@@ -1,0 +1,60 @@
+# AWS / environment
+aws_region   = "ap-south-1"
+environment  = "dev"
+
+# Existing shared infrastructure (already present)
+existing_ecs_cluster_name = "np-pgrest"
+existing_alb_arn          = "arn:aws:elasticloadbalancing:ap-south-1:559387212220:loadbalancer/app/goodedlb/9d02326a4f081eda"
+existing_alb_security_group_id = "sg-xxxxxxxx"
+
+# Listener / cert strategy
+# Port 8443 is already occupied on goodedlb. We use a dedicated new listener port.
+neet_listener_port   = 7443
+shared_certificate_arn = "arn:aws:acm:ap-south-1:559387212220:certificate/79433978-2cfe-439f-b6b4-b5dbe672f399"
+
+# DNS / domain
+hosted_zone_name = "neetprep.com"
+app_fqdn         = "pyq.neetprep.com"
+
+# Network (fill these from your VPC)
+vpc_id = "vpc-xxxxxxxx"
+
+private_subnet_ids = [
+  "subnet-aaaaaaaa",
+  "subnet-bbbbbbbb"
+]
+
+# Container images (ECR)
+ecr_streamlit_image = "559387212220.dkr.ecr.ap-south-1.amazonaws.com/neet-knowledge-streamlit:latest"
+ecr_worker_image    = "559387212220.dkr.ecr.ap-south-1.amazonaws.com/neet-knowledge-worker:latest"
+
+# Secrets (recommended)
+# Keep legacy shared variable empty when using split keys below.
+openai_api_key_secret_arn            = ""
+worker_openai_api_key_secret_arn     = "arn:aws:secretsmanager:ap-south-1:559387212220:secret:openai-api-key-worker-xxxx"
+streamlit_openai_api_key_secret_arn  = "arn:aws:secretsmanager:ap-south-1:559387212220:secret:openai-api-key-streamlit-xxxx"
+youtube_api_key_secret_arn            = ""
+
+# Model / chat behavior
+openai_base_url    = "https://openrouter.ai/api/v1"
+openai_model_name  = "google/gemini-2.0-flash-001"
+chat_history_turns = 4
+
+# Redis
+# Set null to disable AUTH token; or set strong token string.
+redis_auth_token = null
+
+# ECS sizing / autoscaling
+streamlit_desired_count = 2
+streamlit_min_capacity  = 2
+streamlit_max_capacity  = 10
+
+# Enable aws ecs execute-command support
+enable_ecs_exec = true
+
+# Optional tagging
+tags = {
+  Project     = "neet-knowledge"
+  Environment = "dev"
+  ManagedBy   = "terraform"
+}

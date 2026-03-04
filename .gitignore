@@ -48,3 +48,8 @@ chroma_db/
 
 # Sisyphus
 .sisyphus/
+.terraform/
+*.tfstate
+*.tfstate.backup
+.terraform.lock.hcl
+deploy/terraform.tfvars
