@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import re
 import time
 
 import boto3
@@ -31,6 +32,31 @@ def _extract_job(body: str):
         s3_transcript_json_uri,
         track_id,
     )
+
+
+def _extract_youtube_video_id(url: str) -> str:
+    patterns = [
+        r"[?&]v=([A-Za-z0-9_-]{11})",
+        r"youtu\.be/([A-Za-z0-9_-]{11})",
+        r"youtube\.com/shorts/([A-Za-z0-9_-]{11})",
+        r"youtube\.com/embed/([A-Za-z0-9_-]{11})",
+        r"youtube\.com/v/([A-Za-z0-9_-]{11})",
+        r"^([A-Za-z0-9_-]{11})$",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, url or "")
+        if match:
+            return match.group(1)
+    return ""
+
+
+def _build_autoreg_title(source: str, source_type: str) -> str:
+    if source_type == "youtube":
+        video_id = _extract_youtube_video_id(source)
+        if video_id:
+            return f"YouTube Video ({video_id})"
+        return "YouTube Video"
+    return source
 
 
 def main():
@@ -130,7 +156,9 @@ def main():
                             source_id,
                             source,
                             source_type,
-                            source,
+                            _build_autoreg_title(
+                                source=source, source_type=source_type
+                            ),
                             datetime.now().isoformat(),
                             datetime.now().isoformat(),
                             24,

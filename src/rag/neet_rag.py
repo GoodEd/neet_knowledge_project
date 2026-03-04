@@ -64,6 +64,76 @@ class NEETRAG:
         self.prompt_builder = RAGPromptBuilder()
         self._vectorstore_loaded = False
         self.logger = logging.getLogger(__name__)
+        self._source_manager = None
+        self._source_title_cache: Dict[str, str] = {}
+
+    @staticmethod
+    def _is_meaningful_title(title: str) -> bool:
+        normalized = (title or "").strip()
+        if not normalized:
+            return False
+        lowered = normalized.lower()
+        if lowered in {"unknown video", "unknown"}:
+            return False
+        if lowered.startswith("http://") or lowered.startswith("https://"):
+            return False
+        if re.match(r"^youtube video \([0-9A-Za-z_-]{11}\)$", lowered):
+            return False
+        return True
+
+    def _get_source_manager(self):
+        if self._source_manager is not None:
+            return self._source_manager
+        try:
+            from src.utils.content_manager import ContentSourceManager
+
+            self._source_manager = ContentSourceManager()
+        except Exception as e:
+            self.logger.warning(
+                "Could not initialize source manager for title lookup: %s", e
+            )
+            self._source_manager = None
+        return self._source_manager
+
+    def _resolve_youtube_title(
+        self, doc: "Document", source: str, video_id: str
+    ) -> str:
+        metadata_title = str(doc.metadata.get("title") or "").strip()
+        if self._is_meaningful_title(metadata_title):
+            return metadata_title
+
+        metadata_video_title = str(doc.metadata.get("video_title") or "").strip()
+        if self._is_meaningful_title(metadata_video_title):
+            return metadata_video_title
+
+        source_id = str(doc.metadata.get("source_id") or "").strip()
+        if source_id:
+            cached_title = self._source_title_cache.get(source_id)
+            if cached_title:
+                return cached_title
+
+            manager = self._get_source_manager()
+            if manager:
+                try:
+                    source_record = manager.get_source(source_id)
+                    db_title = (
+                        str(source_record.title or "").strip() if source_record else ""
+                    )
+                    if self._is_meaningful_title(db_title):
+                        self._source_title_cache[source_id] = db_title
+                        return db_title
+                except Exception as e:
+                    self.logger.warning(
+                        "Failed source title lookup for source_id=%s: %s", source_id, e
+                    )
+
+        if video_id:
+            return f"YouTube Video ({video_id})"
+        if source and not (
+            source.startswith("http://") or source.startswith("https://")
+        ):
+            return source
+        return "YouTube Video"
 
     @staticmethod
     def _knowledge_base_unavailable(question: str, error: str) -> Dict[str, Any]:
@@ -227,7 +297,7 @@ class NEETRAG:
         content_type = doc.metadata.get("content_type") or doc.metadata.get(
             "source_type", "text"
         )
-        title = doc.metadata.get("title", "")
+        title = str(doc.metadata.get("title", "") or "").strip()
         video_id = doc.metadata.get("video_id", "")
         timestamp = doc.metadata.get("start_time", 0)
         track_id = doc.metadata.get("track_id", "")
@@ -246,6 +316,10 @@ class NEETRAG:
 
         # Add YouTube-specific fields
         if content_type == "youtube" and video_id:
+            title = self._resolve_youtube_title(
+                doc=doc, source=source, video_id=video_id
+            )
+            source_info["title"] = title
             source_info["video_id"] = video_id
             source_info["timestamp"] = timestamp
             source_info["timestamp_url"] = self._format_youtube_url(
