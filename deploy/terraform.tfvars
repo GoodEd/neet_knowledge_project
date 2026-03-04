@@ -59,7 +59,7 @@ health_check_path = "/"
 # CodePipeline / GitHub
 codestar_connection_arn = "arn:aws:codestar-connections:ap-south-1:559387212220:connection/ea32a034-fd4a-4720-b389-159fe4319b78"
 github_repo_id          = "GoodEd/neet_knowledge_project"
-github_branch           = "feature/aws_deployment" # or "main"
+github_branch           = "main"
 
 
 tags = {
