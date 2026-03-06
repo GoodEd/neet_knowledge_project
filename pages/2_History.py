@@ -3,7 +3,10 @@ import redis
 import json
 import os
 
+from src.utils.ui_helpers import setup_public_page_chrome
+
 st.set_page_config(page_title="Chat History", layout="wide")
+setup_public_page_chrome()
 
 st.title("📜 Your Chat History")
 
@@ -48,7 +51,10 @@ if search_pressed and lookup_id:
             st.switch_page("pages/1_Chat.py")
 
         with st.expander("Preview Conversation"):
-            messages = json.loads(r.get(redis_key))
+            raw_history = r.get(redis_key)
+            if isinstance(raw_history, (bytes, bytearray)):
+                raw_history = raw_history.decode("utf-8", errors="ignore")
+            messages = json.loads(raw_history) if isinstance(raw_history, str) else []
             for msg in messages:
                 role = "👤 You" if msg["role"] == "user" else "🤖 Assistant"
                 st.markdown(f"**{role}:** {msg['content'][:100]}...")

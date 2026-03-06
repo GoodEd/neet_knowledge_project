@@ -13,7 +13,7 @@ from dotenv import load_dotenv
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.utils.rag_singleton import get_rag_system
-from src.utils.ui_helpers import hide_admin_and_toolbar
+from src.utils.ui_helpers import setup_public_page_chrome
 
 load_dotenv()
 logger = logging.getLogger(__name__)
@@ -26,7 +26,7 @@ def debug_log(message: str):
 
 st.set_page_config(page_title="NEET Chat", layout="wide")
 
-hide_admin_and_toolbar()
+setup_public_page_chrome()
 
 try:
     CHAT_HISTORY_TURNS = max(0, int(os.getenv("CHAT_HISTORY_TURNS", "4")))

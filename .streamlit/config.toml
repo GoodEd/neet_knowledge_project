@@ -1,6 +1,6 @@
 [ui]
-hideSidebarNav = false
 hideTopBar = true
 
 [client]
+showSidebarNavigation = false
 toolbarMode = "minimal"
