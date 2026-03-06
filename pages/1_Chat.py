@@ -141,7 +141,7 @@ for message in st.session_state.messages:
             and "sources" in message
             and message["sources"]
         ):
-            with st.expander("View Sources"):
+            with st.expander("View Sources", expanded=True):
                 for idx, src in enumerate(message["sources"]):
                     content_type = src.get("content_type", "text")
                     source_url = src.get("source", "Unknown")
@@ -306,7 +306,7 @@ if chat_payload:
 
             # Show sources
             if sources:
-                with st.expander("View Sources"):
+                with st.expander("View Sources", expanded=True):
                     for idx, src in enumerate(sources):
                         content_type = src.get("content_type", "text")
                         source_url = src.get("source", "Unknown")
