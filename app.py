@@ -4,12 +4,11 @@ import sys
 
 # Ensure we can import from src
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from src.utils.ui_helpers import hide_admin_and_toolbar
+from src.utils.ui_helpers import setup_public_page_chrome
 
 st.set_page_config(page_title="NEET Knowledge Base", page_icon="📚", layout="wide")
 
-# Apply UI restrictions for non-admin pages
-hide_admin_and_toolbar()
+setup_public_page_chrome()
 
 st.title("Welcome to NEET Knowledge Assistant 📚")
 

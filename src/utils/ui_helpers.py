@@ -1,19 +1,28 @@
 import streamlit as st
 
-def hide_admin_and_toolbar():
-    hide_streamlit_style = """
+
+def apply_toolbar_style():
+    style_block = """
     <style>
-        [data-testid="stSidebarNavItems"] li:nth-child(4) {
-            display: none;
-        }
-        
         header[data-testid="stHeader"] {
             display: none !important;
         }
-        
+
         .block-container {
             padding-top: 2rem !important;
         }
     </style>
     """
-    st.markdown(hide_streamlit_style, unsafe_allow_html=True)
+    st.markdown(style_block, unsafe_allow_html=True)
+
+
+def render_public_sidebar_links():
+    with st.sidebar:
+        st.page_link("app.py", label="Home", icon="🏠")
+        st.page_link("pages/1_Chat.py", label="Chat", icon="💬")
+        st.page_link("pages/2_History.py", label="History", icon="📜")
+
+
+def setup_public_page_chrome():
+    apply_toolbar_style()
+    render_public_sidebar_links()
