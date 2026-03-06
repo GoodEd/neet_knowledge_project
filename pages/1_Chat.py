@@ -121,8 +121,7 @@ except Exception as e:
     st.stop()
 
 # --- UI ---
-st.title("💬 NEET Knowledge Assistant")
-st.caption(f"Session ID: `{session_id}` (Save this to restore your chat later!)")
+st.title("💬 NEET PYQ Assistant")
 
 if "image_context_text" not in st.session_state:
     st.session_state.image_context_text = ""

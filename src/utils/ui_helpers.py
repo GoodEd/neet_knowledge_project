@@ -18,9 +18,7 @@ def apply_toolbar_style():
 
 def render_public_sidebar_links():
     with st.sidebar:
-        st.page_link("app.py", label="Home", icon="🏠")
         st.page_link("pages/1_Chat.py", label="Chat", icon="💬")
-        st.page_link("pages/2_History.py", label="History", icon="📜")
 
 
 def setup_public_page_chrome():
