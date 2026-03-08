@@ -3,12 +3,14 @@ import os
 import sys
 import uuid
 import json
+import re
 import logging
 import traceback
 import hashlib
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 import redis
 from dotenv import load_dotenv
+import streamlit.components.v1 as components
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -32,6 +34,175 @@ try:
     CHAT_HISTORY_TURNS = max(0, int(os.getenv("CHAT_HISTORY_TURNS", "4")))
 except Exception:
     CHAT_HISTORY_TURNS = 4
+
+
+if "active_youtube_popup" not in st.session_state:
+    # Keep popup state in session so Streamlit reruns can reopen/close the modal reliably.
+    st.session_state.active_youtube_popup = None
+
+
+def _parse_youtube_timestamp(raw_value: str) -> int:
+    value = str(raw_value or "").strip().lower()
+    if not value:
+        return 0
+
+    if value.startswith("t="):
+        value = value[2:]
+
+    if value.isdigit():
+        return int(value)
+
+    if value.endswith("s") and value[:-1].isdigit():
+        return int(value[:-1])
+
+    match = re.fullmatch(r"(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s?)?", value)
+    if not match:
+        return 0
+
+    hours = int(match.group(1) or 0)
+    minutes = int(match.group(2) or 0)
+    seconds = int(match.group(3) or 0)
+    return (hours * 3600) + (minutes * 60) + seconds
+
+
+def _extract_youtube_video_id(parsed_url) -> str:
+    host = parsed_url.netloc.lower().replace("www.", "")
+    path = parsed_url.path.strip("/")
+    query = parse_qs(parsed_url.query)
+
+    if host in {"youtube.com", "m.youtube.com", "youtube-nocookie.com"}:
+        if path == "watch":
+            return (query.get("v") or [""])[0]
+        if path.startswith("embed/"):
+            return path.split("/", 1)[1]
+        if path.startswith("shorts/"):
+            return path.split("/", 1)[1]
+        if path.startswith("live/"):
+            return path.split("/", 1)[1]
+
+    if host == "youtu.be" and path:
+        return path.split("/", 1)[0]
+
+    return ""
+
+
+def _extract_start_seconds(parsed_url) -> int:
+    query = parse_qs(parsed_url.query)
+
+    for key in ("start", "t", "time_continue"):
+        values = query.get(key)
+        if values:
+            seconds = _parse_youtube_timestamp(values[0])
+            if seconds > 0:
+                return seconds
+
+    fragment = parsed_url.fragment
+    if not fragment:
+        return 0
+
+    seconds = _parse_youtube_timestamp(fragment)
+    if seconds > 0:
+        return seconds
+
+    if "=" in fragment:
+        seconds = _parse_youtube_timestamp(fragment.split("=", 1)[1])
+        if seconds > 0:
+            return seconds
+
+    return 0
+
+
+def build_youtube_embed_url(video_url: str) -> str:
+    # Build an embed URL so sources open in-app, while keeping original start timestamp.
+    if not video_url:
+        return ""
+
+    parsed_url = urlparse(video_url)
+    video_id = _extract_youtube_video_id(parsed_url)
+    if not video_id:
+        return ""
+
+    start_seconds = _extract_start_seconds(parsed_url)
+    embed_url = f"https://www.youtube.com/embed/{video_id}?rel=0"
+    if start_seconds > 0:
+        embed_url = f"{embed_url}&start={start_seconds}"
+
+    return embed_url
+
+
+def _render_youtube_popup_body():
+    popup_state = st.session_state.get("active_youtube_popup") or {}
+    embed_url = popup_state.get("embed_url", "")
+    title = popup_state.get("title", "YouTube Source")
+
+    st.markdown(f"**{title}**")
+    components.iframe(embed_url, height=420, scrolling=False)
+
+    if st.button("Close Video", key="close_youtube_popup"):
+        st.session_state.active_youtube_popup = None
+        st.rerun()
+
+
+if hasattr(st, "dialog"):
+    # Dialog keeps the rest of the page inactive while the video popup is open.
+
+    @st.dialog("YouTube Source")
+    def _render_youtube_popup_dialog():
+        _render_youtube_popup_body()
+
+
+else:
+
+    def _render_youtube_popup_dialog():
+        st.warning(
+            "Popup modal is not available in this Streamlit version. "
+            "Upgrade Streamlit to use modal video playback."
+        )
+        _render_youtube_popup_body()
+
+
+def render_youtube_popup_if_needed():
+    popup_state = st.session_state.get("active_youtube_popup")
+    if popup_state and popup_state.get("embed_url"):
+        _render_youtube_popup_dialog()
+
+
+def render_source_item(src: dict, idx: int, key_prefix: str):
+    content_type = src.get("content_type", "text")
+    source_url = src.get("source", "Unknown")
+    title = src.get("title", "")
+
+    if content_type == "youtube":
+        timestamp_url = src.get("timestamp_url") or source_url
+        ts_label = src.get("timestamp_label", "")
+        display_title = title or source_url
+        display_text = f"**Source {idx + 1}** 📺 {display_title}"
+        if ts_label:
+            display_text = f"{display_text} @ {ts_label}"
+
+        st.markdown(display_text)
+
+        embed_url = build_youtube_embed_url(timestamp_url)
+        if embed_url and st.button(
+            "Open Video", key=f"{key_prefix}_youtube_open_{idx}"
+        ):
+            st.session_state.active_youtube_popup = {
+                "title": display_title,
+                "embed_url": embed_url,
+            }
+            st.rerun()
+        elif not embed_url:
+            st.caption("Unable to parse YouTube URL for embedded playback.")
+    else:
+        st.markdown(f"**Source {idx + 1} ({content_type}):** {source_url}")
+
+    st.text(src.get("content", ""))
+
+
+def render_sources_block(sources: list, key_prefix: str):
+    with st.expander("View Sources", expanded=True):
+        for idx, src in enumerate(sources):
+            render_source_item(src, idx, key_prefix)
 
 
 # --- Redis Session Management ---
@@ -131,7 +302,7 @@ if "image_context_pending" not in st.session_state:
     st.session_state.image_context_pending = False
 
 # Display chat history
-for message in st.session_state.messages:
+for message_idx, message in enumerate(st.session_state.messages):
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
 
@@ -141,29 +312,9 @@ for message in st.session_state.messages:
             and "sources" in message
             and message["sources"]
         ):
-            with st.expander("View Sources", expanded=True):
-                for idx, src in enumerate(message["sources"]):
-                    content_type = src.get("content_type", "text")
-                    source_url = src.get("source", "Unknown")
-                    title = src.get("title", "")
-
-                    if content_type == "youtube" and src.get("timestamp_url"):
-                        ts_label = src.get("timestamp_label", "")
-                        display_title = title or source_url
-                        if ts_label:
-                            st.markdown(
-                                f"**Source {idx + 1}** 📺 [{display_title} @ {ts_label}]({src['timestamp_url']})"
-                            )
-                        else:
-                            st.markdown(
-                                f"**Source {idx + 1}** 📺 [{display_title}]({src['timestamp_url']})"
-                            )
-                    else:
-                        st.markdown(
-                            f"**Source {idx + 1} ({content_type}):** {source_url}"
-                        )
-
-                    st.text(src.get("content", ""))
+            render_sources_block(
+                message["sources"], key_prefix=f"history_msg_{message_idx}"
+            )
 
 if st.session_state.image_context_text:
     st.caption("Image context (used only for the next reply)")
@@ -306,25 +457,9 @@ if chat_payload:
 
             # Show sources
             if sources:
-                with st.expander("View Sources", expanded=True):
-                    for idx, src in enumerate(sources):
-                        content_type = src.get("content_type", "text")
-                        source_url = src.get("source", "Unknown")
-                        title = src.get("title", "")
+                render_sources_block(
+                    sources,
+                    key_prefix=f"live_response_{len(st.session_state.messages)}",
+                )
 
-                        if content_type == "youtube" and src.get("timestamp_url"):
-                            ts_label = src.get("timestamp_label", "")
-                            display_title = title or source_url
-                            if ts_label:
-                                st.markdown(
-                                    f"**Source {idx + 1}** 📺 [{display_title} @ {ts_label}]({src['timestamp_url']})"
-                                )
-                            else:
-                                st.markdown(
-                                    f"**Source {idx + 1}** 📺 [{display_title}]({src['timestamp_url']})"
-                                )
-                        else:
-                            st.markdown(
-                                f"**Source {idx + 1} ({content_type}):** {source_url}"
-                            )
-                        st.text(src.get("content"))
+render_youtube_popup_if_needed()
