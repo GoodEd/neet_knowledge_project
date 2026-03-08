@@ -25,6 +25,7 @@ def _extract_job(body: str):
     s3_transcript_json_uri = data.get("s3_transcript_json_uri")
     track_id = data.get("track_id")
     video_title = data.get("video_title")
+    force = data.get("force", "").lower() == "true" if data.get("force") else False
     return (
         source_id,
         source,
@@ -33,6 +34,7 @@ def _extract_job(body: str):
         s3_transcript_json_uri,
         track_id,
         video_title,
+        force,
     )
 
 
@@ -101,6 +103,7 @@ def main():
                     s3_transcript_json_uri,
                     track_id,
                     video_title,
+                    force,
                 ) = _extract_job(body)
             except Exception:
                 logger.exception("Invalid message body. Deleting message: %s", body)
@@ -179,7 +182,16 @@ def main():
                 except Exception as e:
                     logger.error(f"Failed to auto-register source: {e}")
 
-            if source_id and source_record:
+            if source_id and source_record and not force:
+                logger.info(
+                    "Source %s already exists in DB — skipping re-ingestion (use force=true to override)",
+                    source_id,
+                )
+                sqs.delete_message(QueueUrl=queue.queue_url, ReceiptHandle=receipt)
+                continue
+
+            if source_id and source_record and force:
+                logger.info("Force re-ingestion for source %s", source_id)
                 if s3_audio_uri or s3_transcript_json_uri or track_id:
                     src = source_record
                     if src:
