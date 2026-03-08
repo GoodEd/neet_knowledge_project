@@ -193,6 +193,11 @@ def render_source_item(src: dict, idx: int, key_prefix: str):
             st.rerun()
         elif not embed_url:
             st.caption("Unable to parse YouTube URL for embedded playback.")
+
+        if isinstance(timestamp_url, str) and timestamp_url.startswith(
+            ("http://", "https://")
+        ):
+            st.markdown(f"[Open source link (backup)]({timestamp_url})")
     else:
         st.markdown(f"**Source {idx + 1} ({content_type}):** {source_url}")
 
