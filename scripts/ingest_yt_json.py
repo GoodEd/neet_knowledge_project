@@ -61,6 +61,7 @@ def main():
         sys.exit(1)
 
     print(f"Queueing ingestion for video: {video_id}")
+    print(f"Video Title: {video_title}")
 
     try:
         q = IngestionQueue(
@@ -79,6 +80,7 @@ def main():
             s3_transcript_json_uri=http_uri,
             s3_audio_uri=None,
             track_id="yt_api",
+            video_title=video_title,
         )
         print("Successfully queued job!")
         print(f"S3 URI: {s3_uri}")

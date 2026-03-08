@@ -20,6 +20,7 @@ class IngestionQueue:
         s3_audio_uri: str | None = None,
         s3_transcript_json_uri: str | None = None,
         track_id: str | None = None,
+        video_title: str | None = None,
     ):
         body = {
             "source_id": source_id,
@@ -32,6 +33,8 @@ class IngestionQueue:
             body["s3_transcript_json_uri"] = s3_transcript_json_uri
         if track_id:
             body["track_id"] = track_id
+        if video_title:
+            body["video_title"] = video_title
         return self.sqs.send_message(
             QueueUrl=self.queue_url, MessageBody=json.dumps(body)
         )
