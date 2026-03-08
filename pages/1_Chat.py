@@ -175,7 +175,14 @@ def render_source_item(src: dict, idx: int, key_prefix: str):
     if content_type == "youtube":
         timestamp_url = src.get("timestamp_url") or source_url
         ts_label = src.get("timestamp_label", "")
-        display_title = title or source_url
+        channel_name = ""
+        for channel_key in ("channel", "channel_name", "channel_title", "uploader"):
+            candidate = str(src.get(channel_key, "") or "").strip()
+            if candidate:
+                channel_name = candidate
+                break
+
+        display_title = title or channel_name or source_url
         display_text = f"**Source {idx + 1}** 📺 {display_title}"
         if ts_label:
             display_text = f"{display_text} @ {ts_label}"
@@ -197,7 +204,16 @@ def render_source_item(src: dict, idx: int, key_prefix: str):
         if isinstance(timestamp_url, str) and timestamp_url.startswith(
             ("http://", "https://")
         ):
-            st.markdown(f"[Open source link (backup)]({timestamp_url})")
+            link_label = display_title
+            if channel_name and channel_name.lower() not in link_label.lower():
+                link_label = f"{link_label} - {channel_name}"
+            if ts_label:
+                link_label = f"{link_label} @ {ts_label}"
+
+            safe_link_label = (
+                link_label.replace("\\", "\\\\").replace("[", "\\[").replace("]", "\\]")
+            )
+            st.markdown(f"[{safe_link_label}](<{timestamp_url}>)")
     else:
         st.markdown(f"**Source {idx + 1} ({content_type}):** {source_url}")
 
