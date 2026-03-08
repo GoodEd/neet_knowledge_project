@@ -6,6 +6,7 @@ WORKDIR /app
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
     build-essential \
+    curl \
     ffmpeg \
     tesseract-ocr \
     && rm -rf /var/lib/apt/lists/*
@@ -33,5 +34,6 @@ ENV STREAMLIT_SERVER_HEADLESS=true
 # Expose Streamlit port
 EXPOSE 8501
 
-# Run Streamlit with CORS disabled for ALB/WebSocket compatibility
-CMD ["streamlit", "run", "app.py", "--server.address", "0.0.0.0", "--server.enableCORS", "false", "--server.enableWebsocketCompression", "false"]
+RUN chmod +x deploy/entrypoint.sh
+
+CMD ["deploy/entrypoint.sh"]
