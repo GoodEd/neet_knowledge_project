@@ -24,6 +24,8 @@ def _extract_job(body: str):
     s3_audio_uri = data.get("s3_audio_uri")
     s3_transcript_json_uri = data.get("s3_transcript_json_uri")
     track_id = data.get("track_id")
+    video_title = data.get("video_title")
+    force = data.get("force", "").lower() == "true" if data.get("force") else False
     return (
         source_id,
         source,
@@ -31,6 +33,8 @@ def _extract_job(body: str):
         s3_audio_uri,
         s3_transcript_json_uri,
         track_id,
+        video_title,
+        force,
     )
 
 
@@ -98,6 +102,8 @@ def main():
                     s3_audio_uri,
                     s3_transcript_json_uri,
                     track_id,
+                    video_title,
+                    force,
                 ) = _extract_job(body)
             except Exception:
                 logger.exception("Invalid message body. Deleting message: %s", body)
@@ -110,13 +116,14 @@ def main():
                 continue
 
             logger.info(
-                "Processing ingestion job: source_id=%s source=%s type=%s track_id=%s s3_audio_uri=%s s3_transcript_json_uri=%s",
+                "Processing ingestion job: source_id=%s source=%s type=%s track_id=%s s3_audio_uri=%s s3_transcript_json_uri=%s video_title=%s",
                 source_id,
                 source,
                 source_type,
                 track_id,
                 s3_audio_uri,
                 s3_transcript_json_uri,
+                video_title,
             )
             source_record = None
             if source_id:
@@ -137,8 +144,8 @@ def main():
                     new_metadata["s3_transcript_json_uri"] = s3_transcript_json_uri
                 if track_id:
                     new_metadata["track_id"] = track_id
-                # if video_title:
-                #     new_metadata["video_title"] = video_title
+                if video_title:
+                    new_metadata["video_title"] = video_title
 
                 # We do a direct DB insertion so we don't accidentally re-hash the source_id
                 from datetime import datetime
@@ -156,7 +163,8 @@ def main():
                             source_id,
                             source,
                             source_type,
-                            _build_autoreg_title(
+                            video_title
+                            or _build_autoreg_title(
                                 source=source, source_type=source_type
                             ),
                             datetime.now().isoformat(),
@@ -174,7 +182,16 @@ def main():
                 except Exception as e:
                     logger.error(f"Failed to auto-register source: {e}")
 
-            if source_id and source_record:
+            if source_id and source_record and not force:
+                logger.info(
+                    "Source %s already exists in DB — skipping re-ingestion (use force=true to override)",
+                    source_id,
+                )
+                sqs.delete_message(QueueUrl=queue.queue_url, ReceiptHandle=receipt)
+                continue
+
+            if source_id and source_record and force:
+                logger.info("Force re-ingestion for source %s", source_id)
                 if s3_audio_uri or s3_transcript_json_uri or track_id:
                     src = source_record
                     if src:
@@ -200,6 +217,7 @@ def main():
                         s3_audio_uri=s3_audio_uri,
                         s3_transcript_json_uri=s3_transcript_json_uri,
                         track_id=track_id,
+                        video_title=video_title,
                     )
                     result = rag.ingest_processed_content(
                         processed, source_id=source_id

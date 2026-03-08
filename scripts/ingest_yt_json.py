@@ -27,6 +27,11 @@ def main():
         "--bucket", default="neetprep-static-assets", help="S3 bucket name"
     )
     parser.add_argument("--folder", default="yt_pyq_assets", help="S3 folder path")
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Force re-ingestion even if source already exists",
+    )
     args = parser.parse_args()
 
     if not os.path.exists(args.file_path):
@@ -61,6 +66,7 @@ def main():
         sys.exit(1)
 
     print(f"Queueing ingestion for video: {video_id}")
+    print(f"Video Title: {video_title}")
 
     try:
         q = IngestionQueue(
@@ -79,6 +85,8 @@ def main():
             s3_transcript_json_uri=http_uri,
             s3_audio_uri=None,
             track_id="yt_api",
+            video_title=video_title,
+            force=args.force,
         )
         print("Successfully queued job!")
         print(f"S3 URI: {s3_uri}")
