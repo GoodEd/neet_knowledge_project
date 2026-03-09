@@ -11,16 +11,18 @@ def apply_toolbar_style():
         .block-container {
             padding-top: 2rem !important;
         }
+
+        section[data-testid="stSidebar"] {
+            display: none !important;
+        }
+
+        button[data-testid="stSidebarCollapsedControl"] {
+            display: none !important;
+        }
     </style>
     """
     st.markdown(style_block, unsafe_allow_html=True)
 
 
-def render_public_sidebar_links():
-    with st.sidebar:
-        st.page_link("pages/1_Chat.py", label="Chat", icon="💬")
-
-
 def setup_public_page_chrome():
     apply_toolbar_style()
-    render_public_sidebar_links()

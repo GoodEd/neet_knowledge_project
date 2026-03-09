@@ -32,7 +32,9 @@ def debug_log(message: str):
     print(message)
 
 
-st.set_page_config(page_title="NEET Chat", layout="wide")
+st.set_page_config(
+    page_title="NEET Chat", layout="wide", initial_sidebar_state="collapsed"
+)
 
 setup_public_page_chrome()
 
