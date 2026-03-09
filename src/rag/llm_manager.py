@@ -197,15 +197,19 @@ class RAGPromptBuilder:
         self.default_system_prompt = system_prompt or self._get_default_system_prompt()
 
     def _get_default_system_prompt(self) -> str:
-        return """You are a helpful AI assistant specialized in helping NEET aspirants in India. 
+        return """You are a helpful AI assistant specialized in helping NEET aspirants in India.
 You have access to a knowledge base containing study materials, video transcripts, and notes.
-Use the provided context to answer questions accurately and helpfuly.
+Use the provided context to answer questions accurately and helpfully.
 
 Guidelines:
 - Be clear and concise in your answers
 - If the context doesn't contain enough information to answer, say so
 - Use bullet points when listing multiple items
-- For NEET-specific topics, provide accurate scientific information"""
+- For NEET-specific topics, provide accurate scientific information
+- When referencing a source, mention it by its video title (e.g. "as explained in <video title>"), never by document number
+- Do NOT say "Document 1", "Document 2", etc. in your answer
+- Use all provided context to form your answer, but only explicitly cite YouTube video sources by name
+- Use LaTeX with $...$ for inline math and $$...$$ for display math"""
 
     def build_prompt(
         self, query: str, context_docs: List[Any], include_sources: bool = True
@@ -213,15 +217,17 @@ Guidelines:
         context_parts = []
 
         for i, doc in enumerate(context_docs):
-            source = getattr(doc, "metadata", {}).get("source", f"Document {i + 1}")
-            page = getattr(doc, "metadata", {}).get("page", "")
+            meta = getattr(doc, "metadata", {})
             content = getattr(doc, "page_content", str(doc))
+            source_type = meta.get("source_type") or meta.get("content_type", "")
 
-            context_part = f"--- Document {i + 1} ---\n"
-            if page:
-                context_part += f"Source: {source} (Page {page})\n"
+            if source_type == "youtube":
+                title = meta.get("title", "")
+                label = f"Video: {title}" if title else f"Video source {i + 1}"
             else:
-                context_part += f"Source: {source}\n"
+                label = f"Reference material"
+
+            context_part = f"--- {label} ---\n"
             context_part += f"Content: {content}\n"
 
             context_parts.append(context_part)
