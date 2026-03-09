@@ -10,7 +10,6 @@ import hashlib
 from urllib.parse import parse_qs, urlparse
 import redis
 from dotenv import load_dotenv
-import streamlit.components.v1 as components
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -63,11 +62,66 @@ except Exception:
     SHOW_MORE_LIMIT = 10
 
 
-if "active_youtube_popup" not in st.session_state:
-    st.session_state.active_youtube_popup = None
-
-if "active_question_popup" not in st.session_state:
-    st.session_state.active_question_popup = None
+POPUP_MODAL_HTML = """
+<style>
+#nk-modal-overlay {
+    display:none; position:fixed; inset:0; z-index:999999;
+    background:rgba(0,0,0,0.6); align-items:center; justify-content:center;
+}
+#nk-modal-overlay .nk-modal-box {
+    background:#fff; border-radius:12px; width:90vw; max-width:800px;
+    max-height:90vh; display:flex; flex-direction:column;
+    box-shadow:0 8px 32px rgba(0,0,0,0.3); overflow:hidden;
+}
+#nk-modal-overlay .nk-modal-header {
+    display:flex; justify-content:space-between; align-items:center;
+    padding:12px 16px; border-bottom:1px solid #e0e0e0;
+}
+#nk-modal-overlay .nk-modal-close {
+    background:none; border:none; font-size:22px; cursor:pointer;
+    color:#666; padding:0 4px; line-height:1;
+}
+#nk-modal-overlay #nk-modal-iframe {
+    border:none; flex:1; min-height:480px;
+}
+#nk-modal-overlay #nk-modal-footer {
+    padding:8px 16px; border-top:1px solid #e0e0e0;
+    text-align:center; font-size:13px;
+}
+.nk-open-btn {
+    padding:6px 16px; border:1px solid #ddd; border-radius:6px;
+    background:#f8f8f8; cursor:pointer; font-size:14px;
+}
+.nk-open-btn:hover { background:#e8e8e8; }
+</style>
+<div id="nk-modal-overlay" onclick="if(event.target===this)closeNKModal()">
+  <div class="nk-modal-box">
+    <div class="nk-modal-header">
+      <span id="nk-modal-title" style="font-weight:600;font-size:16px;"></span>
+      <button class="nk-modal-close" onclick="closeNKModal()">&times;</button>
+    </div>
+    <iframe id="nk-modal-iframe" allow="autoplay; encrypted-media" allowfullscreen></iframe>
+    <div id="nk-modal-footer"></div>
+  </div>
+</div>
+<script>
+function openNKModal(src, title, linkUrl, linkText) {
+    var o = document.getElementById('nk-modal-overlay');
+    document.getElementById('nk-modal-title').textContent = title || '';
+    document.getElementById('nk-modal-iframe').src = src;
+    var f = document.getElementById('nk-modal-footer');
+    if (linkUrl) {
+        f.innerHTML = '<a href="'+linkUrl+'" target="_blank" rel="noopener">'+(linkText||linkUrl)+'</a>';
+        f.style.display = 'block';
+    } else { f.style.display = 'none'; }
+    o.style.display = 'flex';
+}
+function closeNKModal() {
+    document.getElementById('nk-modal-overlay').style.display = 'none';
+    document.getElementById('nk-modal-iframe').src = '';
+}
+</script>
+"""
 
 
 def _parse_youtube_timestamp(raw_value: str) -> int:
@@ -159,76 +213,23 @@ def build_youtube_embed_url(video_url: str) -> str:
     return embed_url
 
 
-def _render_youtube_popup_body():
-    popup_state = st.session_state.get("active_youtube_popup") or {}
-    embed_url = popup_state.get("embed_url", "")
-    title = popup_state.get("title", "YouTube Source")
-
-    st.markdown(f"**{title}**")
-    components.iframe(embed_url, height=420, scrolling=False)
-
-    if st.button("Close Video", key="close_youtube_popup"):
-        st.session_state.active_youtube_popup = None
-        st.rerun()
+def _js_open_video_button(embed_url: str, title: str):
+    safe_title = title.replace("'", "\\'").replace("<", "&lt;").replace(">", "&gt;")
+    safe_url = embed_url.replace("'", "\\'")
+    st.markdown(
+        f'<button class="nk-open-btn" onclick="openNKModal(\'{safe_url}\','
+        f"'{safe_title}','','')\">Open Video</button>",
+        unsafe_allow_html=True,
+    )
 
 
-if hasattr(st, "dialog"):
-    # Dialog keeps the rest of the page inactive while the video popup is open.
-
-    @st.dialog("YouTube Source")
-    def _render_youtube_popup_dialog():
-        _render_youtube_popup_body()
-
-
-else:
-
-    def _render_youtube_popup_dialog():
-        st.warning(
-            "Popup modal is not available in this Streamlit version. "
-            "Upgrade Streamlit to use modal video playback."
-        )
-        _render_youtube_popup_body()
-
-
-def render_youtube_popup_if_needed():
-    popup_state = st.session_state.get("active_youtube_popup")
-    if popup_state and popup_state.get("embed_url"):
-        _render_youtube_popup_dialog()
-
-
-def _render_question_popup_body():
-    popup_state = st.session_state.get("active_question_popup") or {}
-    question_id = popup_state.get("question_id", "")
-    question_url = f"https://www.neetprep.com/epubQuestion/{question_id}"
-
-    components.iframe(question_url, height=500, scrolling=True)
-    st.markdown(f"[Open on NeetPrep]({question_url})")
-
-    if st.button("Close", key="close_question_popup"):
-        st.session_state.active_question_popup = None
-        st.rerun()
-
-
-if hasattr(st, "dialog"):
-
-    @st.dialog("Question", width="large")
-    def _render_question_popup_dialog():
-        _render_question_popup_body()
-
-else:
-
-    def _render_question_popup_dialog():
-        st.warning(
-            "Popup modal is not available in this Streamlit version. "
-            "Upgrade Streamlit to use modal question display."
-        )
-        _render_question_popup_body()
-
-
-def render_question_popup_if_needed():
-    popup_state = st.session_state.get("active_question_popup")
-    if popup_state and popup_state.get("question_id"):
-        _render_question_popup_dialog()
+def _js_open_question_button(question_id: str):
+    q_url = f"https://www.neetprep.com/epubQuestion/{question_id}"
+    st.markdown(
+        f'<button class="nk-open-btn" onclick="openNKModal(\'{q_url}\','
+        f"'Question','{q_url}','Open on NeetPrep')\">Open Question</button>",
+        unsafe_allow_html=True,
+    )
 
 
 def render_source_item(src: dict, idx: int, key_prefix: str):
@@ -254,15 +255,9 @@ def render_source_item(src: dict, idx: int, key_prefix: str):
         st.markdown(display_text)
 
         embed_url = build_youtube_embed_url(timestamp_url)
-        if embed_url and st.button(
-            "Open Video", key=f"{key_prefix}_youtube_open_{idx}"
-        ):
-            st.session_state.active_youtube_popup = {
-                "title": display_title,
-                "embed_url": embed_url,
-            }
-            st.rerun()
-        elif not embed_url:
+        if embed_url:
+            _js_open_video_button(embed_url, display_title)
+        else:
             st.caption("Unable to parse YouTube URL for embedded playback.")
 
         if isinstance(timestamp_url, str) and timestamp_url.startswith(
@@ -293,10 +288,7 @@ def render_question_item(src: dict, idx: int, key_prefix: str):
     if content_preview:
         st.text(content_preview)
 
-    if st.button("Open Question", key=f"{key_prefix}_question_open_{idx}"):
-        st.session_state.active_question_popup = {"question_id": question_id}
-        st.rerun()
-
+    _js_open_question_button(question_id)
     st.markdown(f"[Open on NeetPrep]({question_url})")
 
 
@@ -621,5 +613,4 @@ if chat_payload:
                     question_sources=question_sources,
                 )
 
-render_youtube_popup_if_needed()
-render_question_popup_if_needed()
+st.markdown(POPUP_MODAL_HTML, unsafe_allow_html=True)
