@@ -331,13 +331,14 @@ def render_sources_block(
     question_sources=None,
 ):
     if sources:
-        with st.expander("Show Videos", expanded=False):
+        with st.expander("Show Videos", expanded=True):
             for idx, src in enumerate(sources):
                 render_source_item(src, idx, key_prefix)
 
             if SHOW_MORE_ENABLED and message_idx >= 0:
                 done_key = f"show_more_done_{message_idx}"
                 if not st.session_state.get(done_key, False):
+                    st.divider()
                     st.button(
                         "Show More Videos",
                         key=f"{key_prefix}_show_more",
@@ -346,7 +347,7 @@ def render_sources_block(
                     )
 
     if SHOW_QUESTION_SOURCES and question_sources:
-        with st.expander("Show Questions", expanded=True):
+        with st.expander("Show Questions", expanded=False):
             for idx, src in enumerate(question_sources):
                 render_question_item(src, idx, f"{key_prefix}_q")
 
