@@ -21,6 +21,12 @@ load_dotenv()
 logger = logging.getLogger(__name__)
 
 
+def _latex_to_streamlit(text: str) -> str:
+    text = re.sub(r"\\\[(.+?)\\\]", r"$$\1$$", text, flags=re.DOTALL)
+    text = re.sub(r"\\\((.+?)\\\)", r"$\1$", text, flags=re.DOTALL)
+    return text
+
+
 def debug_log(message: str):
     logger.info(message)
     print(message)
@@ -325,7 +331,7 @@ if "image_context_pending" not in st.session_state:
 # Display chat history
 for message_idx, message in enumerate(st.session_state.messages):
     with st.chat_message(message["role"]):
-        st.markdown(message["content"])
+        st.markdown(_latex_to_streamlit(message["content"]))
 
         # Display sources if assistant message has them
         if (
@@ -469,7 +475,7 @@ if chat_payload:
                 answer = response.get("answer", "No answer generated.")
                 sources = response.get("sources", [])
 
-            st.markdown(answer)
+            st.markdown(_latex_to_streamlit(answer))
 
             # Save assistant response to state
             assistant_msg = {"role": "assistant", "content": answer, "sources": sources}
