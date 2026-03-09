@@ -70,3 +70,7 @@ tags = {
 
 # Admin UI Password
 admin_password = "ihoZfDDpMhARpPjW"
+
+# Feature flags
+show_more_enabled     = "1"
+show_question_sources = "1"

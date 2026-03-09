@@ -428,7 +428,9 @@ resource "aws_ecs_task_definition" "streamlit" {
         { name = "REDIS_URL", value = local.redis_url },
         { name = "SQS_QUEUE_URL", value = aws_sqs_queue.ingestion.url },
         { name = "CHAT_HISTORY_TURNS", value = tostring(var.chat_history_turns) },
-        { name = "ADMIN_PASSWORD", value = var.admin_password }
+        { name = "ADMIN_PASSWORD", value = var.admin_password },
+        { name = "SHOW_MORE_ENABLED", value = var.show_more_enabled },
+        { name = "SHOW_QUESTION_SOURCES", value = var.show_question_sources }
       ], local.streamlit_openai_plain_env)
 
       secrets = local.streamlit_container_secrets
