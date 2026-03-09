@@ -207,3 +207,13 @@ variable "enable_ecs_exec" {
   type        = bool
   default     = true
 }
+
+variable "show_more_enabled" {
+  type    = string
+  default = "0"
+}
+
+variable "show_question_sources" {
+  type    = string
+  default = "0"
+}
