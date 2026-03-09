@@ -327,6 +327,10 @@ class NEETRAG:
             )
             source_info["timestamp_label"] = self._format_timestamp_label(timestamp)
 
+        question_id = doc.metadata.get("question_id", "")
+        if question_id:
+            source_info["question_id"] = str(question_id)
+
         return source_info
 
     @staticmethod
@@ -449,6 +453,26 @@ class NEETRAG:
 
         return [self._build_source_info(doc) for doc in selected_docs]
 
+    def _build_question_sources(self, docs: List[Document]) -> List[Dict[str, Any]]:
+        seen_question_ids: set = set()
+        results: List[Dict[str, Any]] = []
+
+        for doc in docs:
+            content_type = doc.metadata.get("content_type") or doc.metadata.get(
+                "source_type", ""
+            )
+            if content_type != "csv_qa_pair":
+                continue
+
+            question_id = str(doc.metadata.get("question_id", "")).strip()
+            if not question_id or question_id in seen_question_ids:
+                continue
+
+            seen_question_ids.add(question_id)
+            results.append(self._build_source_info(doc))
+
+        return results
+
     def query(
         self,
         question: str,
@@ -493,8 +517,14 @@ class NEETRAG:
             answer = f"Error generating answer: {str(e)}"
 
         sources = self._build_public_sources(relevant_docs)
+        question_sources = self._build_question_sources(relevant_docs)
 
-        return {"answer": answer, "sources": sources, "question": question}
+        return {
+            "answer": answer,
+            "sources": sources,
+            "question_sources": question_sources,
+            "question": question,
+        }
 
     def query_with_history(
         self,
@@ -533,8 +563,13 @@ class NEETRAG:
             answer = f"Error generating answer: {str(e)}"
 
         sources = self._build_public_sources(relevant_docs)
+        question_sources = self._build_question_sources(relevant_docs)
 
-        return {"answer": answer, "sources": sources}
+        return {
+            "answer": answer,
+            "sources": sources,
+            "question_sources": question_sources,
+        }
 
     def get_more_youtube_sources(
         self,

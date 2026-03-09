@@ -50,6 +50,13 @@ SHOW_MORE_ENABLED = os.getenv("SHOW_MORE_ENABLED", "0").strip().lower() in {
     "on",
 }
 
+SHOW_QUESTION_SOURCES = os.getenv("SHOW_QUESTION_SOURCES", "0").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
+
 try:
     SHOW_MORE_LIMIT = max(1, int(os.getenv("SHOW_MORE_LIMIT", "10")))
 except Exception:
@@ -57,8 +64,10 @@ except Exception:
 
 
 if "active_youtube_popup" not in st.session_state:
-    # Keep popup state in session so Streamlit reruns can reopen/close the modal reliably.
     st.session_state.active_youtube_popup = None
+
+if "active_question_popup" not in st.session_state:
+    st.session_state.active_question_popup = None
 
 
 def _parse_youtube_timestamp(raw_value: str) -> int:
@@ -187,6 +196,41 @@ def render_youtube_popup_if_needed():
         _render_youtube_popup_dialog()
 
 
+def _render_question_popup_body():
+    popup_state = st.session_state.get("active_question_popup") or {}
+    question_id = popup_state.get("question_id", "")
+    question_url = f"https://www.neetprep.com/epubQuestion/{question_id}"
+
+    components.iframe(question_url, height=500, scrolling=True)
+    st.markdown(f"[Open on NeetPrep]({question_url})")
+
+    if st.button("Close", key="close_question_popup"):
+        st.session_state.active_question_popup = None
+        st.rerun()
+
+
+if hasattr(st, "dialog"):
+
+    @st.dialog("Question", width="large")
+    def _render_question_popup_dialog():
+        _render_question_popup_body()
+
+else:
+
+    def _render_question_popup_dialog():
+        st.warning(
+            "Popup modal is not available in this Streamlit version. "
+            "Upgrade Streamlit to use modal question display."
+        )
+        _render_question_popup_body()
+
+
+def render_question_popup_if_needed():
+    popup_state = st.session_state.get("active_question_popup")
+    if popup_state and popup_state.get("question_id"):
+        _render_question_popup_dialog()
+
+
 def render_source_item(src: dict, idx: int, key_prefix: str):
     content_type = src.get("content_type", "text")
     source_url = src.get("source", "Unknown")
@@ -240,6 +284,22 @@ def render_source_item(src: dict, idx: int, key_prefix: str):
     st.text(src.get("content", ""))
 
 
+def render_question_item(src: dict, idx: int, key_prefix: str):
+    question_id = src.get("question_id", "")
+    question_url = f"https://www.neetprep.com/epubQuestion/{question_id}"
+    content_preview = src.get("content", "")
+
+    st.markdown(f"**Question {idx + 1}**")
+    if content_preview:
+        st.text(content_preview)
+
+    if st.button("Open Question", key=f"{key_prefix}_question_open_{idx}"):
+        st.session_state.active_question_popup = {"question_id": question_id}
+        st.rerun()
+
+    st.markdown(f"[Open on NeetPrep]({question_url})")
+
+
 def _collect_video_ids(sources: list) -> list:
     ids = []
     for src in sources:
@@ -264,23 +324,31 @@ def _on_show_more(message_idx: int, query: str, current_sources: list):
 
 
 def render_sources_block(
-    sources: list, key_prefix: str, message_idx: int = -1, query: str = ""
+    sources: list,
+    key_prefix: str,
+    message_idx: int = -1,
+    query: str = "",
+    question_sources=None,
 ):
-    with st.expander("View Sources", expanded=True):
-        for idx, src in enumerate(sources):
-            render_source_item(src, idx, key_prefix)
+    if sources:
+        with st.expander("Show Videos", expanded=True):
+            for idx, src in enumerate(sources):
+                render_source_item(src, idx, key_prefix)
 
-        if not SHOW_MORE_ENABLED or message_idx < 0:
-            return
+            if SHOW_MORE_ENABLED and message_idx >= 0:
+                done_key = f"show_more_done_{message_idx}"
+                if not st.session_state.get(done_key, False):
+                    st.button(
+                        "Show More Videos",
+                        key=f"{key_prefix}_show_more",
+                        on_click=_on_show_more,
+                        args=(message_idx, query, sources),
+                    )
 
-        done_key = f"show_more_done_{message_idx}"
-        if not st.session_state.get(done_key, False):
-            st.button(
-                "Show More Videos",
-                key=f"{key_prefix}_show_more",
-                on_click=_on_show_more,
-                args=(message_idx, query, sources),
-            )
+    if SHOW_QUESTION_SOURCES and question_sources:
+        with st.expander("Show Questions", expanded=True):
+            for idx, src in enumerate(question_sources):
+                render_question_item(src, idx, f"{key_prefix}_q")
 
 
 # --- Redis Session Management ---
@@ -387,16 +455,15 @@ for message_idx, message in enumerate(st.session_state.messages):
     with st.chat_message(message["role"]):
         st.markdown(_latex_to_streamlit(message["content"]))
 
-        if (
-            message["role"] == "assistant"
-            and "sources" in message
-            and message["sources"]
+        if message["role"] == "assistant" and (
+            message.get("sources") or message.get("question_sources")
         ):
             render_sources_block(
-                message["sources"],
+                message.get("sources", []),
                 key_prefix=f"history_msg_{message_idx}",
                 message_idx=message_idx,
                 query=last_user_query,
+                question_sources=message.get("question_sources"),
             )
 
 if st.session_state.image_context_text:
@@ -533,17 +600,25 @@ if chat_payload:
 
             st.markdown(_latex_to_streamlit(answer))
 
-            # Save assistant response to state
-            assistant_msg = {"role": "assistant", "content": answer, "sources": sources}
+            question_sources = response.get("question_sources", [])
+
+            assistant_msg = {
+                "role": "assistant",
+                "content": answer,
+                "sources": sources,
+                "question_sources": question_sources,
+            }
             st.session_state.messages.append(assistant_msg)
             save_history()
 
-            if sources:
+            if sources or question_sources:
                 render_sources_block(
                     sources,
                     key_prefix=f"live_response_{len(st.session_state.messages)}",
                     message_idx=len(st.session_state.messages) - 1,
                     query=prompt,
+                    question_sources=question_sources,
                 )
 
 render_youtube_popup_if_needed()
+render_question_popup_if_needed()
