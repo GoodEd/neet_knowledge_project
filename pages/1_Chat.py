@@ -41,6 +41,18 @@ try:
 except Exception:
     CHAT_HISTORY_TURNS = 4
 
+SHOW_MORE_ENABLED = os.getenv("SHOW_MORE_ENABLED", "0").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
+
+try:
+    SHOW_MORE_LIMIT = max(1, int(os.getenv("SHOW_MORE_LIMIT", "10")))
+except Exception:
+    SHOW_MORE_LIMIT = 10
+
 
 if "active_youtube_popup" not in st.session_state:
     # Keep popup state in session so Streamlit reruns can reopen/close the modal reliably.
@@ -226,10 +238,47 @@ def render_source_item(src: dict, idx: int, key_prefix: str):
     st.text(src.get("content", ""))
 
 
-def render_sources_block(sources: list, key_prefix: str):
+def _collect_video_ids(sources: list) -> list:
+    ids = []
+    for src in sources:
+        vid = src.get("video_id", "")
+        if vid and vid not in ids:
+            ids.append(vid)
+    return ids
+
+
+def _on_show_more(message_idx: int, query: str, current_sources: list):
+    rag = get_rag_system()
+    exclude = _collect_video_ids(current_sources)
+    extra = rag.get_more_youtube_sources(
+        question=query,
+        exclude_video_ids=exclude,
+        limit=SHOW_MORE_LIMIT,
+    )
+    if extra:
+        st.session_state.messages[message_idx]["sources"].extend(extra)
+        save_history()
+    st.session_state[f"show_more_done_{message_idx}"] = True
+
+
+def render_sources_block(
+    sources: list, key_prefix: str, message_idx: int = -1, query: str = ""
+):
     with st.expander("View Sources", expanded=True):
         for idx, src in enumerate(sources):
             render_source_item(src, idx, key_prefix)
+
+        if not SHOW_MORE_ENABLED or message_idx < 0:
+            return
+
+        done_key = f"show_more_done_{message_idx}"
+        if not st.session_state.get(done_key, False):
+            st.button(
+                "Show More Videos",
+                key=f"{key_prefix}_show_more",
+                on_click=_on_show_more,
+                args=(message_idx, query, sources),
+            )
 
 
 # --- Redis Session Management ---
@@ -328,19 +377,24 @@ if "image_context_hash" not in st.session_state:
 if "image_context_pending" not in st.session_state:
     st.session_state.image_context_pending = False
 
-# Display chat history
+last_user_query = ""
 for message_idx, message in enumerate(st.session_state.messages):
+    if message["role"] == "user":
+        last_user_query = message["content"]
+
     with st.chat_message(message["role"]):
         st.markdown(_latex_to_streamlit(message["content"]))
 
-        # Display sources if assistant message has them
         if (
             message["role"] == "assistant"
             and "sources" in message
             and message["sources"]
         ):
             render_sources_block(
-                message["sources"], key_prefix=f"history_msg_{message_idx}"
+                message["sources"],
+                key_prefix=f"history_msg_{message_idx}",
+                message_idx=message_idx,
+                query=last_user_query,
             )
 
 if st.session_state.image_context_text:
@@ -482,11 +536,12 @@ if chat_payload:
             st.session_state.messages.append(assistant_msg)
             save_history()
 
-            # Show sources
             if sources:
                 render_sources_block(
                     sources,
                     key_prefix=f"live_response_{len(st.session_state.messages)}",
+                    message_idx=len(st.session_state.messages) - 1,
+                    query=prompt,
                 )
 
 render_youtube_popup_if_needed()

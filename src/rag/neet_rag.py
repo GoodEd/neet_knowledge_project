@@ -536,6 +536,53 @@ class NEETRAG:
 
         return {"answer": answer, "sources": sources}
 
+    def get_more_youtube_sources(
+        self,
+        question: str,
+        exclude_video_ids: Optional[List[str]] = None,
+        limit: int = 10,
+    ) -> List[Dict[str, Any]]:
+        if not self._vectorstore_loaded:
+            try:
+                self.vector_manager.load_vectorstore()
+            except Exception:
+                return []
+
+        exclude = set(exclude_video_ids or [])
+        fetch_k = max(limit * 6, 30)
+
+        try:
+            scored = self.vector_manager.similarity_search_with_score(
+                question, k=fetch_k
+            )
+        except Exception:
+            return []
+
+        seen_videos: set = set()
+        results: List[Dict[str, Any]] = []
+
+        for doc, score in scored:
+            if not self._is_youtube_doc(doc):
+                continue
+
+            video_id = doc.metadata.get("video_id") or self._extract_video_id(
+                doc.metadata.get("source", "")
+            )
+            if not video_id or video_id in exclude or video_id in seen_videos:
+                continue
+
+            sim = self._score_to_similarity(score)
+            if sim < self.similarity_threshold:
+                continue
+
+            seen_videos.add(video_id)
+            results.append(self._build_source_info(doc))
+
+            if len(results) >= limit:
+                break
+
+        return results
+
     def get_stats(self) -> Dict[str, Any]:
         try:
             info = self.vector_manager.get_collection_info()
