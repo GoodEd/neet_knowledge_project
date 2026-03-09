@@ -558,28 +558,33 @@ class NEETRAG:
         except Exception:
             return []
 
+        # Filter to eligible YouTube docs (not already shown)
+        eligible: List[tuple] = []
         seen_videos: set = set()
-        results: List[Dict[str, Any]] = []
-
         for doc, score in scored:
             if not self._is_youtube_doc(doc):
                 continue
-
             video_id = doc.metadata.get("video_id") or self._extract_video_id(
                 doc.metadata.get("source", "")
             )
             if not video_id or video_id in exclude or video_id in seen_videos:
                 continue
-
-            sim = self._score_to_similarity(score)
-            if sim < self.similarity_threshold:
-                continue
-
             seen_videos.add(video_id)
-            results.append(self._build_source_info(doc))
+            eligible.append((doc, score, video_id))
 
-            if len(results) >= limit:
-                break
+        # Apply threshold with fallback (same pattern as _retrieve_docs):
+        # try threshold first, fall back to all eligible if nothing passes
+        filtered = [
+            (doc, vid)
+            for doc, score, vid in eligible
+            if self._score_to_similarity(score) >= self.similarity_threshold
+        ]
+        if not filtered:
+            filtered = [(doc, vid) for doc, score, vid in eligible]
+
+        results: List[Dict[str, Any]] = []
+        for doc, _ in filtered[:limit]:
+            results.append(self._build_source_info(doc))
 
         return results
 
