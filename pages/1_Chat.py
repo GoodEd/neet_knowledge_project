@@ -331,7 +331,7 @@ def render_sources_block(
     question_sources=None,
 ):
     if sources:
-        with st.expander("Show Videos", expanded=True):
+        with st.expander("Show Videos", expanded=False):
             for idx, src in enumerate(sources):
                 render_source_item(src, idx, key_prefix)
 
