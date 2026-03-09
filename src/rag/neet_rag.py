@@ -572,18 +572,20 @@ class NEETRAG:
             seen_videos.add(video_id)
             eligible.append((doc, score, video_id))
 
-        # Apply threshold with fallback (same pattern as _retrieve_docs):
-        # try threshold first, fall back to all eligible if nothing passes
-        filtered = [
+        # Take videos above threshold first, then backfill from below-threshold
+        # to reach the requested limit (same spirit as _retrieve_docs fallback)
+        above = [
             (doc, vid)
             for doc, score, vid in eligible
             if self._score_to_similarity(score) >= self.similarity_threshold
         ]
-        if not filtered:
-            filtered = [(doc, vid) for doc, score, vid in eligible]
+        above_vids = {vid for _, vid in above}
+        below = [(doc, vid) for doc, score, vid in eligible if vid not in above_vids]
+
+        combined = above + below
 
         results: List[Dict[str, Any]] = []
-        for doc, _ in filtered[:limit]:
+        for doc, _ in combined[:limit]:
             results.append(self._build_source_info(doc))
 
         return results
