@@ -139,18 +139,6 @@ def _ensure_modal_js():
     components.html(f"<script>{_NK_MODAL_JS}</script>", height=0)
 
 
-def _scroll_to_bottom():
-    import streamlit.components.v1 as components
-
-    components.html(
-        "<script>setTimeout(function(){"
-        "var m=window.parent.document.querySelector('section.main');"
-        "if(m)m.scrollTo({top:m.scrollHeight,behavior:'smooth'});"
-        "},300);</script>",
-        height=0,
-    )
-
-
 def _parse_youtube_timestamp(raw_value: str) -> int:
     value = str(raw_value or "").strip().lower()
     if not value:
@@ -338,8 +326,29 @@ def render_source_item(src: dict, idx: int, key_prefix: str):
     st.text(src.get("content", ""))
 
 
-def _ask_assistant_callback(question_text: str):
-    st.session_state["ask_assistant_input"] = question_text
+def _js_ask_assistant_button(question_text: str):
+    import streamlit.components.v1 as components
+
+    escaped = (
+        question_text.replace("\\", "\\\\")
+        .replace("`", "\\`")
+        .replace("$", "\\$")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+    )
+    components.html(
+        f"""<button onclick="(function(){{
+          var ta=window.parent.document.querySelector('textarea[data-testid=stChatInputTextArea]');
+          if(!ta)return;
+          var set=Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype,'value').set;
+          set.call(ta,`{escaped}`);
+          ta.dispatchEvent(new Event('input',{{bubbles:true}}));
+          ta.focus();
+        }})()"
+         style="padding:6px 16px;border:1px solid #ddd;border-radius:6px;
+         background:#f8f8f8;cursor:pointer;font-size:14px;color:#333">Ask Assistant</button>""",
+        height=42,
+    )
 
 
 def render_question_item(
@@ -348,6 +357,7 @@ def render_question_item(
     question_id = src.get("question_id", "")
     question_url = f"https://www.neetprep.com/epubQuestion/{question_id}"
     content_preview = src.get("content", "")
+    full_content = src.get("full_content", content_preview)
 
     st.markdown(f"**Question {idx + 1}**")
     if content_preview:
@@ -355,14 +365,9 @@ def render_question_item(
 
     _js_open_question_button(question_id)
 
-    if show_ask_assistant and content_preview:
-        question_text = _extract_question_text(content_preview)
-        st.button(
-            "Ask Assistant",
-            key=f"{key_prefix}_ask_{idx}",
-            on_click=_ask_assistant_callback,
-            args=(question_text,),
-        )
+    if show_ask_assistant and full_content:
+        question_text = _extract_question_text(full_content)
+        _js_ask_assistant_button(question_text)
 
     st.markdown(f"[Open on NeetPrep]({question_url})")
 
@@ -554,8 +559,6 @@ if st.session_state.image_context_text:
         st.session_state.image_context_pending = False
         st.success("Image context cleared.")
 
-ask_assistant_input = st.session_state.pop("ask_assistant_input", None)
-
 chat_payload = st.chat_input(
     "Ask a PYQ question and get its solution from your favourite teachers on youtube",
     accept_file=True,
@@ -563,13 +566,10 @@ chat_payload = st.chat_input(
     max_upload_size=5,
 )
 
-if ask_assistant_input or chat_payload:
+if chat_payload:
     prompt = ""
     uploaded_image = None
-
-    if ask_assistant_input:
-        prompt = ask_assistant_input.strip()
-    elif isinstance(chat_payload, str):
+    if isinstance(chat_payload, str):
         prompt = chat_payload.strip()
     else:
         prompt = str(getattr(chat_payload, "text", "") or "").strip()
@@ -696,8 +696,5 @@ if ask_assistant_input or chat_payload:
                     query=prompt,
                     question_sources=question_sources,
                 )
-
-        if ask_assistant_input:
-            _scroll_to_bottom()
 
 _ensure_modal_js()
