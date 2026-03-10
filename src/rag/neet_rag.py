@@ -475,6 +475,90 @@ class NEETRAG:
 
         return results
 
+    def _retrieve_youtube_sources(
+        self, question: str, top_k: int = 5
+    ) -> List[Dict[str, Any]]:
+        fetch_k = max(top_k * 6, 30)
+        try:
+            scored = self.vector_manager.similarity_search_with_score(
+                question, k=fetch_k, filter={"source_type": "youtube"}
+            )
+        except Exception:
+            return []
+
+        seen_videos: set = set()
+        results: List[Dict[str, Any]] = []
+        for doc, score in scored:
+            sim = self._score_to_similarity(score)
+            if sim < self.similarity_threshold:
+                continue
+            video_id = doc.metadata.get("video_id") or self._extract_video_id(
+                doc.metadata.get("source", "")
+            )
+            if not video_id or video_id in seen_videos:
+                continue
+            seen_videos.add(video_id)
+            results.append(self._build_source_info(doc))
+            if len(results) >= top_k:
+                break
+
+        if not results:
+            seen_videos = set()
+            for doc, score in scored[:fetch_k]:
+                video_id = doc.metadata.get("video_id") or self._extract_video_id(
+                    doc.metadata.get("source", "")
+                )
+                if not video_id or video_id in seen_videos:
+                    continue
+                seen_videos.add(video_id)
+                results.append(self._build_source_info(doc))
+                if len(results) >= top_k:
+                    break
+
+        return results
+
+    def _retrieve_question_sources(
+        self, question: str, top_k: int = 5
+    ) -> List[Dict[str, Any]]:
+        fetch_k = max(top_k * 4, 20)
+        try:
+            scored = self.vector_manager.similarity_search_with_score(
+                question, k=fetch_k, filter={"source_type": "csv"}
+            )
+        except Exception:
+            return []
+
+        seen_question_ids: set = set()
+        results: List[Dict[str, Any]] = []
+        for doc, score in scored:
+            sim = self._score_to_similarity(score)
+            if sim < self.similarity_threshold:
+                continue
+            question_id = str(doc.metadata.get("question_id", "")).strip()
+            if not question_id or question_id in seen_question_ids:
+                continue
+            seen_question_ids.add(question_id)
+            info = self._build_source_info(doc)
+            info["full_content"] = doc.page_content
+            results.append(info)
+            if len(results) >= top_k:
+                break
+
+        if not results:
+            seen_question_ids = set()
+            for doc, score in scored[:fetch_k]:
+                question_id = str(doc.metadata.get("question_id", "")).strip()
+                if not question_id or question_id in seen_question_ids:
+                    continue
+                seen_question_ids.add(question_id)
+                info = self._build_source_info(doc)
+                info["full_content"] = doc.page_content
+                results.append(info)
+                if len(results) >= top_k:
+                    break
+
+        return results
+
     def query(
         self,
         question: str,
@@ -518,8 +602,10 @@ class NEETRAG:
         except Exception as e:
             answer = f"Error generating answer: {str(e)}"
 
-        sources = self._build_public_sources(relevant_docs)
-        question_sources = self._build_question_sources(relevant_docs)
+        sources = self._retrieve_youtube_sources(question=question, top_k=top_k)
+        question_sources = self._retrieve_question_sources(
+            question=question, top_k=top_k
+        )
 
         return {
             "answer": answer,
@@ -564,8 +650,10 @@ class NEETRAG:
         except Exception as e:
             answer = f"Error generating answer: {str(e)}"
 
-        sources = self._build_public_sources(relevant_docs)
-        question_sources = self._build_question_sources(relevant_docs)
+        sources = self._retrieve_youtube_sources(question=question, top_k=top_k)
+        question_sources = self._retrieve_question_sources(
+            question=question, top_k=top_k
+        )
 
         return {
             "answer": answer,
