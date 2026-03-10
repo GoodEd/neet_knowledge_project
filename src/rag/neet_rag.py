@@ -8,7 +8,7 @@ from collections import defaultdict
 from langchain_core.documents import Document
 
 from ..processors import ContentProcessor
-from .vector_store import VectorStoreManager
+from .vector_store import VectorStoreManager, build_composite_manager
 from .llm_manager import LLMManager, RAGPromptBuilder
 from .index_registry import resolve_runtime_index
 
@@ -50,12 +50,24 @@ class NEETRAG:
             chunk_overlap=chunk_overlap or config.chunk_overlap,
         )
 
-        self.vector_manager = VectorStoreManager(
-            persist_directory=resolved_persist_dir,
-            embedding_provider=embedding_provider,
-            embedding_model=embedding_model,
-            embedding_dimension=embedding_dimension,
-        )
+        youtube_subdir = os.path.join(resolved_persist_dir, "youtube")
+        csv_subdir = os.path.join(resolved_persist_dir, "csv")
+        has_split_indexes = os.path.isdir(youtube_subdir) or os.path.isdir(csv_subdir)
+
+        if has_split_indexes:
+            self.vector_manager = build_composite_manager(
+                base_persist_directory=resolved_persist_dir,
+                embedding_provider=embedding_provider,
+                embedding_model=embedding_model,
+                embedding_dimension=embedding_dimension,
+            )
+        else:
+            self.vector_manager = VectorStoreManager(
+                persist_directory=resolved_persist_dir,
+                embedding_provider=embedding_provider,
+                embedding_model=embedding_model,
+                embedding_dimension=embedding_dimension,
+            )
 
         self.llm_manager = LLMManager(
             provider=llm_provider, model=llm_model, base_url=llm_base_url
@@ -678,17 +690,14 @@ class NEETRAG:
 
         try:
             scored = self.vector_manager.similarity_search_with_score(
-                question, k=fetch_k
+                question, k=fetch_k, filter={"source_type": "youtube"}
             )
         except Exception:
             return []
 
-        # Filter to eligible YouTube docs (not already shown)
         eligible: List[tuple] = []
         seen_videos: set = set()
         for doc, score in scored:
-            if not self._is_youtube_doc(doc):
-                continue
             video_id = doc.metadata.get("video_id") or self._extract_video_id(
                 doc.metadata.get("source", "")
             )
