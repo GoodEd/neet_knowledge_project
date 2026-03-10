@@ -19,6 +19,16 @@ def apply_toolbar_style():
         button[data-testid="stSidebarCollapsedControl"] {
             display: none !important;
         }
+
+        /* Taller chat input box */
+        [data-testid="stChatInputTextArea"] {
+            min-height: 80px !important;
+        }
+
+        /* Align attach icon to bottom-left */
+        [data-testid="stChatInput"] [data-testid="stChatInputFileUploadButton"] {
+            align-self: flex-end !important;
+        }
     </style>
     """
     st.markdown(style_block, unsafe_allow_html=True)
