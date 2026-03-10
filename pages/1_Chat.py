@@ -106,7 +106,7 @@ _NK_MODAL_JS = """
   d.id = 'nk-modal-overlay';
   d.innerHTML = '<div class="nk-box">'
     + '<div class="nk-hdr"><span id="nk-modal-title" style="font-weight:600;font-size:16px"></span>'
-    + '<button class="nk-close" id="nk-modal-close-btn" onclick="window.closeNKModal&&window.closeNKModal()">\\u00d7</button></div>'
+    + '<button class="nk-close" id="nk-modal-close-btn" title="Close modal" onclick="window.closeNKModal&&window.closeNKModal()">\\u00d7</button></div>'
     + '<iframe id="nk-modal-iframe" allow="autoplay; encrypted-media" allowfullscreen></iframe>'
     + '<div id="nk-modal-footer"></div></div>';
   pd.body.appendChild(d);
@@ -123,7 +123,7 @@ _NK_MODAL_JS = """
     pd.getElementById('nk-modal-iframe').src = src;
     var f = pd.getElementById('nk-modal-footer');
     if (linkUrl) {
-      f.innerHTML = '<a href="'+linkUrl+'" target="_blank" rel="noopener">'+(linkText||linkUrl)+'</a>';
+      f.innerHTML = '<a id="link-modal-footer" title="'+(linkText||linkUrl)+'" href="'+linkUrl+'" target="_blank" rel="noopener">'+(linkText||linkUrl)+'</a>';
       f.style.display = 'block';
     } else { f.style.display = 'none'; }
     pd.getElementById('nk-modal-overlay').style.display = 'flex';
@@ -228,7 +228,7 @@ def build_youtube_embed_url(video_url: str) -> str:
     return embed_url
 
 
-def _js_open_video_button(embed_url: str, title: str):
+def _js_open_video_button(embed_url: str, title: str, idx: int = 0):
     import streamlit.components.v1 as components
 
     safe_title = (
@@ -238,20 +238,24 @@ def _js_open_video_button(embed_url: str, title: str):
         .replace(">", "&gt;")
     )
     safe_url = embed_url.replace("\\", "\\\\").replace("'", "\\'")
+    btn_id = f"btn-open-video-{idx}"
     components.html(
-        f"""<button onclick="window.parent.openNKModal('{safe_url}','{safe_title}','','')"
+        f"""<button id="{btn_id}" title="Open Video: {safe_title}"
+         onclick="window.parent.openNKModal('{safe_url}','{safe_title}','','')"
          style="padding:6px 16px;border:1px solid #ddd;border-radius:6px;
          background:#f8f8f8;cursor:pointer;font-size:14px;color:#333">Open Video</button>""",
         height=42,
     )
 
 
-def _js_open_question_button(question_id: str):
+def _js_open_question_button(question_id: str, idx: int = 0):
     import streamlit.components.v1 as components
 
     q_url = f"https://www.neetprep.com/epubQuestion/{question_id}"
+    btn_id = f"btn-open-question-{idx}"
     components.html(
-        f"""<button onclick="window.parent.openNKModal('{q_url}','Question','{q_url}','Open on NeetPrep')"
+        f"""<button id="{btn_id}" title="Open Question {question_id}"
+         onclick="window.parent.openNKModal('{q_url}','Question','{q_url}','Open on NeetPrep')"
          style="padding:6px 16px;border:1px solid #ddd;border-radius:6px;
          background:#f8f8f8;cursor:pointer;font-size:14px;color:#333">Open Question</button>""",
         height=42,
@@ -303,7 +307,7 @@ def render_source_item(src: dict, idx: int, key_prefix: str):
 
         embed_url = build_youtube_embed_url(timestamp_url)
         if embed_url:
-            _js_open_video_button(embed_url, display_title)
+            _js_open_video_button(embed_url, display_title, idx=idx)
         else:
             st.caption("Unable to parse YouTube URL for embedded playback.")
 
@@ -319,14 +323,20 @@ def render_source_item(src: dict, idx: int, key_prefix: str):
             safe_link_label = (
                 link_label.replace("\\", "\\\\").replace("[", "\\[").replace("]", "\\]")
             )
-            st.markdown(f"[{safe_link_label}](<{timestamp_url}>)")
+            link_id = f"link-youtube-{idx}"
+            st.markdown(
+                f'<a id="{link_id}" title="Watch on YouTube: {safe_link_label}" '
+                f'href="{timestamp_url}" target="_blank" rel="noopener">'
+                f"{safe_link_label}</a>",
+                unsafe_allow_html=True,
+            )
     else:
         st.markdown(f"**Source {idx + 1} ({content_type}):** {source_url}")
 
     st.text(src.get("content", ""))
 
 
-def _js_ask_assistant_button(question_text: str):
+def _js_ask_assistant_button(question_text: str, idx: int = 0):
     import streamlit.components.v1 as components
 
     escaped = (
@@ -336,8 +346,10 @@ def _js_ask_assistant_button(question_text: str):
         .replace("<", "&lt;")
         .replace(">", "&gt;")
     )
+    btn_id = f"btn-ask-assistant-{idx}"
     components.html(
-        f"""<button onclick="(function(){{
+        f"""<button id="{btn_id}" title="Ask Assistant about this question"
+         onclick="(function(){{
           var ta=window.parent.document.querySelector('textarea[data-testid=stChatInputTextArea]');
           if(!ta)return;
           var set=Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype,'value').set;
@@ -363,13 +375,19 @@ def render_question_item(
     if content_preview:
         st.text(content_preview)
 
-    _js_open_question_button(question_id)
+    _js_open_question_button(question_id, idx=idx)
 
     if show_ask_assistant and full_content:
         question_text = _extract_question_text(full_content)
-        _js_ask_assistant_button(question_text)
+        _js_ask_assistant_button(question_text, idx=idx)
 
-    st.markdown(f"[Open on NeetPrep]({question_url})")
+    link_id = f"link-neetprep-{idx}"
+    st.markdown(
+        f'<a id="{link_id}" title="Open Question {question_id} on NeetPrep" '
+        f'href="{question_url}" target="_blank" rel="noopener">'
+        f"Open on NeetPrep</a>",
+        unsafe_allow_html=True,
+    )
 
 
 def _collect_video_ids(sources: list) -> list:
@@ -553,7 +571,7 @@ if st.session_state.image_context_text:
         disabled=True,
         key="image_context_preview",
     )
-    if st.button("Clear Image Context"):
+    if st.button("Clear Image Context", key="btn_clear_image_context"):
         st.session_state.image_context_text = ""
         st.session_state.image_context_hash = ""
         st.session_state.image_context_pending = False
