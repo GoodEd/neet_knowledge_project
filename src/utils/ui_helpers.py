@@ -1,4 +1,5 @@
 import streamlit as st
+import streamlit.components.v1 as components
 
 
 def apply_toolbar_style():
@@ -34,20 +35,22 @@ def apply_toolbar_style():
     st.markdown(style_block, unsafe_allow_html=True)
 
 
-GTM_HTML = """
-<script>
-window.dataLayer = window.dataLayer || [];
-(function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start':
-new Date().getTime(),event:'gtm.js'});var f=d.getElementsByTagName(s)[0],
-j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
-'https://www.googletagmanager.com/gtm.js?id='+i+dl;f.parentNode.insertBefore(j,f);
-})(window,document,'script','dataLayer','GTM-N5B8N77');
-</script>
-<noscript><iframe src="https://www.googletagmanager.com/ns.html?id=GTM-N5B8N77"
-height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
+_GTM_JS = """
+(function() {
+  var pw = window.parent || window;
+  var pd = pw.document;
+  if (pw.__nk_gtm_loaded) return;
+  pw.__nk_gtm_loaded = true;
+  pw.dataLayer = pw.dataLayer || [];
+  pw.dataLayer.push({'gtm.start': new Date().getTime(), event: 'gtm.js'});
+  var s = pd.createElement('script');
+  s.async = true;
+  s.src = 'https://www.googletagmanager.com/gtm.js?id=GTM-N5B8N77';
+  pd.head.appendChild(s);
+})();
 """
 
 
 def setup_public_page_chrome():
     apply_toolbar_style()
-    st.markdown(GTM_HTML, unsafe_allow_html=True)
+    components.html(f"<script>{_GTM_JS}</script>", height=0)
