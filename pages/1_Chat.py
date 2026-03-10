@@ -62,66 +62,70 @@ except Exception:
     SHOW_MORE_LIMIT = 10
 
 
-POPUP_MODAL_HTML = """
-<style>
-#nk-modal-overlay {
-    display:none; position:fixed; inset:0; z-index:999999;
-    background:rgba(0,0,0,0.6); align-items:center; justify-content:center;
-}
-#nk-modal-overlay .nk-modal-box {
-    background:#fff; border-radius:12px; width:90vw; max-width:800px;
-    max-height:90vh; display:flex; flex-direction:column;
-    box-shadow:0 8px 32px rgba(0,0,0,0.3); overflow:hidden;
-}
-#nk-modal-overlay .nk-modal-header {
-    display:flex; justify-content:space-between; align-items:center;
-    padding:12px 16px; border-bottom:1px solid #e0e0e0;
-}
-#nk-modal-overlay .nk-modal-close {
-    background:none; border:none; font-size:22px; cursor:pointer;
-    color:#666; padding:0 4px; line-height:1;
-}
-#nk-modal-overlay #nk-modal-iframe {
-    border:none; flex:1; min-height:480px;
-}
-#nk-modal-overlay #nk-modal-footer {
-    padding:8px 16px; border-top:1px solid #e0e0e0;
-    text-align:center; font-size:13px;
-}
-.nk-open-btn {
-    padding:6px 16px; border:1px solid #ddd; border-radius:6px;
-    background:#f8f8f8; cursor:pointer; font-size:14px;
-}
-.nk-open-btn:hover { background:#e8e8e8; }
-</style>
-<div id="nk-modal-overlay" onclick="if(event.target===this)closeNKModal()">
-  <div class="nk-modal-box">
-    <div class="nk-modal-header">
-      <span id="nk-modal-title" style="font-weight:600;font-size:16px;"></span>
-      <button class="nk-modal-close" onclick="closeNKModal()">&times;</button>
-    </div>
-    <iframe id="nk-modal-iframe" allow="autoplay; encrypted-media" allowfullscreen></iframe>
-    <div id="nk-modal-footer"></div>
-  </div>
-</div>
-<script>
-function openNKModal(src, title, linkUrl, linkText) {
-    var o = document.getElementById('nk-modal-overlay');
-    document.getElementById('nk-modal-title').textContent = title || '';
-    document.getElementById('nk-modal-iframe').src = src;
-    var f = document.getElementById('nk-modal-footer');
+_NK_MODAL_JS = """
+(function(){
+  var pd = window.parent.document;
+  if (pd.getElementById('nk-modal-overlay')) return;
+  var css = pd.createElement('style');
+  css.textContent = `
+    #nk-modal-overlay {
+      display:none; position:fixed; inset:0; z-index:999999;
+      background:rgba(0,0,0,0.6); align-items:center; justify-content:center;
+    }
+    #nk-modal-overlay .nk-box {
+      background:#fff; border-radius:12px; width:90vw; max-width:800px;
+      max-height:90vh; display:flex; flex-direction:column;
+      box-shadow:0 8px 32px rgba(0,0,0,0.3); overflow:hidden;
+    }
+    #nk-modal-overlay .nk-hdr {
+      display:flex; justify-content:space-between; align-items:center;
+      padding:12px 16px; border-bottom:1px solid #e0e0e0;
+    }
+    #nk-modal-overlay .nk-close {
+      background:none; border:none; font-size:22px; cursor:pointer;
+      color:#666; padding:0 4px; line-height:1;
+    }
+    #nk-modal-overlay .nk-close:hover { color:#333; }
+    #nk-modal-iframe { border:none; flex:1; min-height:480px; }
+    #nk-modal-footer {
+      padding:8px 16px; border-top:1px solid #e0e0e0;
+      text-align:center; font-size:13px;
+    }
+  `;
+  pd.head.appendChild(css);
+  var d = pd.createElement('div');
+  d.id = 'nk-modal-overlay';
+  d.innerHTML = '<div class="nk-box">'
+    + '<div class="nk-hdr"><span id="nk-modal-title" style="font-weight:600;font-size:16px"></span>'
+    + '<button class="nk-close" id="nk-modal-close-btn">\\u00d7</button></div>'
+    + '<iframe id="nk-modal-iframe" allow="autoplay; encrypted-media" allowfullscreen></iframe>'
+    + '<div id="nk-modal-footer"></div></div>';
+  pd.body.appendChild(d);
+  d.addEventListener('click', function(e){ if(e.target===d) window.parent.closeNKModal(); });
+  pd.getElementById('nk-modal-close-btn').addEventListener('click', function(){ window.parent.closeNKModal(); });
+  window.parent.openNKModal = function(src, title, linkUrl, linkText) {
+    var o = pd.getElementById('nk-modal-overlay');
+    pd.getElementById('nk-modal-title').textContent = title || '';
+    pd.getElementById('nk-modal-iframe').src = src;
+    var f = pd.getElementById('nk-modal-footer');
     if (linkUrl) {
-        f.innerHTML = '<a href="'+linkUrl+'" target="_blank" rel="noopener">'+(linkText||linkUrl)+'</a>';
-        f.style.display = 'block';
+      f.innerHTML = '<a href="'+linkUrl+'" target="_blank" rel="noopener">'+(linkText||linkUrl)+'</a>';
+      f.style.display = 'block';
     } else { f.style.display = 'none'; }
     o.style.display = 'flex';
-}
-function closeNKModal() {
-    document.getElementById('nk-modal-overlay').style.display = 'none';
-    document.getElementById('nk-modal-iframe').src = '';
-}
-</script>
+  };
+  window.parent.closeNKModal = function() {
+    pd.getElementById('nk-modal-overlay').style.display = 'none';
+    pd.getElementById('nk-modal-iframe').src = '';
+  };
+})();
 """
+
+
+def _ensure_modal_js():
+    import streamlit.components.v1 as components
+
+    components.html(f"<script>{_NK_MODAL_JS}</script>", height=0)
 
 
 def _parse_youtube_timestamp(raw_value: str) -> int:
@@ -214,21 +218,32 @@ def build_youtube_embed_url(video_url: str) -> str:
 
 
 def _js_open_video_button(embed_url: str, title: str):
-    safe_title = title.replace("'", "\\'").replace("<", "&lt;").replace(">", "&gt;")
-    safe_url = embed_url.replace("'", "\\'")
-    st.markdown(
-        f'<button class="nk-open-btn" onclick="openNKModal(\'{safe_url}\','
-        f"'{safe_title}','','')\">Open Video</button>",
-        unsafe_allow_html=True,
+    import streamlit.components.v1 as components
+
+    safe_title = (
+        title.replace("\\", "\\\\")
+        .replace("'", "\\'")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+    )
+    safe_url = embed_url.replace("\\", "\\\\").replace("'", "\\'")
+    components.html(
+        f"""<button onclick="window.parent.openNKModal('{safe_url}','{safe_title}','','')"
+         style="padding:6px 16px;border:1px solid #ddd;border-radius:6px;
+         background:#f8f8f8;cursor:pointer;font-size:14px;color:#333">Open Video</button>""",
+        height=42,
     )
 
 
 def _js_open_question_button(question_id: str):
+    import streamlit.components.v1 as components
+
     q_url = f"https://www.neetprep.com/epubQuestion/{question_id}"
-    st.markdown(
-        f'<button class="nk-open-btn" onclick="openNKModal(\'{q_url}\','
-        f"'Question','{q_url}','Open on NeetPrep')\">Open Question</button>",
-        unsafe_allow_html=True,
+    components.html(
+        f"""<button onclick="window.parent.openNKModal('{q_url}','Question','{q_url}','Open on NeetPrep')"
+         style="padding:6px 16px;border:1px solid #ddd;border-radius:6px;
+         background:#f8f8f8;cursor:pointer;font-size:14px;color:#333">Open Question</button>""",
+        height=42,
     )
 
 
@@ -613,4 +628,4 @@ if chat_payload:
                     question_sources=question_sources,
                 )
 
-st.markdown(POPUP_MODAL_HTML, unsafe_allow_html=True)
+_ensure_modal_js()
