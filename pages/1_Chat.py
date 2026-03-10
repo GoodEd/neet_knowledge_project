@@ -88,13 +88,14 @@ _NK_MODAL_JS = """
     #nk-modal-overlay .nk-hdr {
       display:flex; justify-content:space-between; align-items:center;
       padding:12px 16px; border-bottom:1px solid #e0e0e0;
+      position:relative; z-index:2;
     }
     #nk-modal-overlay .nk-close {
-      background:none; border:none; font-size:22px; cursor:pointer;
-      color:#666; padding:0 4px; line-height:1;
+      background:none; border:none; font-size:28px; cursor:pointer;
+      color:#666; padding:4px 8px; line-height:1; position:relative; z-index:3;
     }
     #nk-modal-overlay .nk-close:hover { color:#333; }
-    #nk-modal-iframe { border:none; flex:1; min-height:480px; }
+    #nk-modal-iframe { border:none; flex:1; min-height:480px; position:relative; z-index:1; }
     #nk-modal-footer {
       padding:8px 16px; border-top:1px solid #e0e0e0;
       text-align:center; font-size:13px;
@@ -105,7 +106,7 @@ _NK_MODAL_JS = """
   d.id = 'nk-modal-overlay';
   d.innerHTML = '<div class="nk-box">'
     + '<div class="nk-hdr"><span id="nk-modal-title" style="font-weight:600;font-size:16px"></span>'
-    + '<button class="nk-close" id="nk-modal-close-btn">\\u00d7</button></div>'
+    + '<button class="nk-close" id="nk-modal-close-btn" onclick="window.closeNKModal&&window.closeNKModal()">\\u00d7</button></div>'
     + '<iframe id="nk-modal-iframe" allow="autoplay; encrypted-media" allowfullscreen></iframe>'
     + '<div id="nk-modal-footer"></div></div>';
   pd.body.appendChild(d);
@@ -116,7 +117,6 @@ _NK_MODAL_JS = """
   }
 
   d.addEventListener('click', function(e){ if(e.target===d) doClose(); });
-  pd.getElementById('nk-modal-close-btn').addEventListener('click', doClose);
 
   pw.openNKModal = function(src, title, linkUrl, linkText) {
     pd.getElementById('nk-modal-title').textContent = title || '';
