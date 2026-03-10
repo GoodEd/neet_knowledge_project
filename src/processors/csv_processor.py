@@ -24,6 +24,8 @@ class CSVProcessor:
         id_col_hints: Optional[List[str]] = None,
         question_col_hints: Optional[List[str]] = None,
         explanation_col_hints: Optional[List[str]] = None,
+        chapter_col_hints: Optional[List[str]] = None,
+        topic_col_hints: Optional[List[str]] = None,
     ):
         self.id_col_hints = id_col_hints or [
             "id",
@@ -42,6 +44,17 @@ class CSVProcessor:
             "solution",
             "answer",
             "ans",
+        ]
+        self.chapter_col_hints = chapter_col_hints or [
+            "chapter_name",
+            "chapter",
+            "subject_chapter",
+        ]
+        self.topic_col_hints = topic_col_hints or [
+            "topic_names",
+            "topic_name",
+            "topic",
+            "topics",
         ]
 
     def _find_column(self, columns: List[str], hints: List[str]) -> Optional[str]:
@@ -121,6 +134,8 @@ class CSVProcessor:
             id_col = self._find_column(columns, self.id_col_hints)
             q_col = self._find_column(columns, self.question_col_hints)
             e_col = self._find_column(columns, self.explanation_col_hints)
+            chapter_col = self._find_column(columns, self.chapter_col_hints)
+            topic_col = self._find_column(columns, self.topic_col_hints)
 
             if not q_col:
                 raise ValueError(
@@ -151,22 +166,46 @@ class CSVProcessor:
                 if not question_id:
                     question_id = str(idx)
 
-                combined_content = (
+                chapter_name = ""
+                if chapter_col:
+                    raw = row[chapter_col]
+                    if raw is not None and not pd.isna(raw):
+                        chapter_name = str(raw).strip()
+
+                topic_names = ""
+                if topic_col:
+                    raw = row[topic_col]
+                    if raw is not None and not pd.isna(raw):
+                        topic_names = str(raw).strip()
+
+                prefix_parts = []
+                if chapter_name:
+                    prefix_parts.append(f"Chapter: {chapter_name}")
+                if topic_names:
+                    prefix_parts.append(f"Topic: {topic_names}")
+                prefix = "\n".join(prefix_parts)
+
+                qa_body = (
                     f"Question:\n{question_md}\n\n"
                     f"Official Solution/Explanation:\n{explanation_md}"
                 )
+                combined_content = f"{prefix}\n\n{qa_body}" if prefix else qa_body
 
-                documents.append(
-                    {
-                        "content": combined_content,
-                        "source": source_name,
-                        "source_type": "csv",
-                        "content_type": "csv_qa_pair",
-                        "row_index": idx,
-                        "question_id": question_id,
-                        "timestamp": now,
-                    }
-                )
+                doc_meta = {
+                    "content": combined_content,
+                    "source": source_name,
+                    "source_type": "csv",
+                    "content_type": "csv_qa_pair",
+                    "row_index": idx,
+                    "question_id": question_id,
+                    "timestamp": now,
+                }
+                if chapter_name:
+                    doc_meta["chapter_name"] = chapter_name
+                if topic_names:
+                    doc_meta["topic_names"] = topic_names
+
+                documents.append(doc_meta)
 
             return {
                 "documents": documents,
