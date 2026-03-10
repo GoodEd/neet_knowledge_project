@@ -139,6 +139,18 @@ def _ensure_modal_js():
     components.html(f"<script>{_NK_MODAL_JS}</script>", height=0)
 
 
+def _scroll_to_bottom():
+    import streamlit.components.v1 as components
+
+    components.html(
+        "<script>setTimeout(function(){"
+        "var m=window.parent.document.querySelector('section.main');"
+        "if(m)m.scrollTo({top:m.scrollHeight,behavior:'smooth'});"
+        "},300);</script>",
+        height=0,
+    )
+
+
 def _parse_youtube_timestamp(raw_value: str) -> int:
     value = str(raw_value or "").strip().lower()
     if not value:
@@ -684,5 +696,8 @@ if ask_assistant_input or chat_payload:
                     query=prompt,
                     question_sources=question_sources,
                 )
+
+        if ask_assistant_input:
+            _scroll_to_bottom()
 
 _ensure_modal_js()
