@@ -56,6 +56,13 @@ SHOW_QUESTION_SOURCES = os.getenv("SHOW_QUESTION_SOURCES", "0").strip().lower() 
     "on",
 }
 
+ASK_ASSISTANT_ENABLED = os.getenv("ASK_ASSISTANT_ENABLED", "0").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
+
 try:
     SHOW_MORE_LIMIT = max(1, int(os.getenv("SHOW_MORE_LIMIT", "10")))
 except Exception:
@@ -251,6 +258,27 @@ def _js_open_question_button(question_id: str):
     )
 
 
+def _extract_question_text(content: str) -> str:
+    """Extract only the question portion from CSV page_content.
+
+    CSV docs store content as:
+      Question:
+      <markdown>
+
+      Official Solution/Explanation:
+      <markdown>
+
+    Returns the question markdown (without the 'Question:' prefix) or the
+    full content if the expected structure is not found.
+    """
+    separator = "Official Solution/Explanation:"
+    parts = content.split(separator, 1)
+    question_part = parts[0].strip()
+    if question_part.lower().startswith("question:"):
+        question_part = question_part[len("question:") :].strip()
+    return question_part or content.strip()
+
+
 def render_source_item(src: dict, idx: int, key_prefix: str):
     content_type = src.get("content_type", "text")
     source_url = src.get("source", "Unknown")
@@ -298,7 +326,13 @@ def render_source_item(src: dict, idx: int, key_prefix: str):
     st.text(src.get("content", ""))
 
 
-def render_question_item(src: dict, idx: int, key_prefix: str):
+def _ask_assistant_callback(question_text: str):
+    st.session_state["ask_assistant_input"] = question_text
+
+
+def render_question_item(
+    src: dict, idx: int, key_prefix: str, show_ask_assistant: bool = False
+):
     question_id = src.get("question_id", "")
     question_url = f"https://www.neetprep.com/epubQuestion/{question_id}"
     content_preview = src.get("content", "")
@@ -308,6 +342,16 @@ def render_question_item(src: dict, idx: int, key_prefix: str):
         st.text(content_preview)
 
     _js_open_question_button(question_id)
+
+    if show_ask_assistant and content_preview:
+        question_text = _extract_question_text(content_preview)
+        st.button(
+            "Ask Assistant",
+            key=f"{key_prefix}_ask_{idx}",
+            on_click=_ask_assistant_callback,
+            args=(question_text,),
+        )
+
     st.markdown(f"[Open on NeetPrep]({question_url})")
 
 
@@ -360,7 +404,12 @@ def render_sources_block(
     if SHOW_QUESTION_SOURCES and question_sources:
         with st.expander("Show Questions", expanded=False):
             for idx, src in enumerate(question_sources):
-                render_question_item(src, idx, f"{key_prefix}_q")
+                render_question_item(
+                    src,
+                    idx,
+                    f"{key_prefix}_q",
+                    show_ask_assistant=ASK_ASSISTANT_ENABLED,
+                )
 
 
 # --- Redis Session Management ---
@@ -493,7 +542,8 @@ if st.session_state.image_context_text:
         st.session_state.image_context_pending = False
         st.success("Image context cleared.")
 
-# User Input
+ask_assistant_input = st.session_state.pop("ask_assistant_input", None)
+
 chat_payload = st.chat_input(
     "Ask a PYQ question and get its solution from your favourite teachers on youtube",
     accept_file=True,
@@ -501,10 +551,13 @@ chat_payload = st.chat_input(
     max_upload_size=5,
 )
 
-if chat_payload:
+if ask_assistant_input or chat_payload:
     prompt = ""
     uploaded_image = None
-    if isinstance(chat_payload, str):
+
+    if ask_assistant_input:
+        prompt = ask_assistant_input.strip()
+    elif isinstance(chat_payload, str):
         prompt = chat_payload.strip()
     else:
         prompt = str(getattr(chat_payload, "text", "") or "").strip()

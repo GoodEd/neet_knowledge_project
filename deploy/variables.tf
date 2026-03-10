@@ -217,3 +217,8 @@ variable "show_question_sources" {
   type    = string
   default = "0"
 }
+
+variable "ask_assistant_enabled" {
+  type    = string
+  default = "0"
+}
