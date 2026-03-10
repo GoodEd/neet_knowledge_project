@@ -106,16 +106,25 @@ class VectorStoreManager:
         return self.vectorstore.similarity_search(query=query, k=k, filter=filter)
 
     def similarity_search_with_score(
-        self, query: str, k: int = 5, filter: Optional[Dict[str, Any]] = None
+        self,
+        query: str,
+        k: int = 5,
+        filter: Optional[Dict[str, Any]] = None,
+        fetch_k: Optional[int] = None,
     ) -> List[tuple]:
         if self.vectorstore is None:
             raise ValueError(
                 "Vectorstore not initialized. Load or create a vectorstore first."
             )
 
-        return self.vectorstore.similarity_search_with_score(
-            query=query, k=k, filter=filter
-        )
+        kwargs: Dict[str, Any] = {"query": query, "k": k}
+        if filter is not None:
+            kwargs["filter"] = filter
+            kwargs["fetch_k"] = fetch_k or max(k * 100, 1000)
+        elif fetch_k is not None:
+            kwargs["fetch_k"] = fetch_k
+
+        return self.vectorstore.similarity_search_with_score(**kwargs)
 
     def delete_collection(self, collection_name: str = "neet_knowledge"):
         if os.path.exists(self.persist_directory):
