@@ -469,7 +469,9 @@ class NEETRAG:
                 continue
 
             seen_question_ids.add(question_id)
-            results.append(self._build_source_info(doc))
+            info = self._build_source_info(doc)
+            info["full_content"] = doc.page_content
+            results.append(info)
 
         return results
 
