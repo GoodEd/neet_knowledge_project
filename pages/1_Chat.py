@@ -64,7 +64,8 @@ except Exception:
 
 _NK_MODAL_JS = """
 (function(){
-  var pd = window.parent.document;
+  var pw = window.parent;
+  var pd = pw.document;
   if (pd.getElementById('nk-modal-overlay')) return;
   var css = pd.createElement('style');
   css.textContent = `
@@ -101,10 +102,16 @@ _NK_MODAL_JS = """
     + '<iframe id="nk-modal-iframe" allow="autoplay; encrypted-media" allowfullscreen></iframe>'
     + '<div id="nk-modal-footer"></div></div>';
   pd.body.appendChild(d);
-  d.addEventListener('click', function(e){ if(e.target===d) window.parent.closeNKModal(); });
-  pd.getElementById('nk-modal-close-btn').addEventListener('click', function(){ window.parent.closeNKModal(); });
-  window.parent.openNKModal = function(src, title, linkUrl, linkText) {
-    var o = pd.getElementById('nk-modal-overlay');
+
+  function doClose() {
+    pd.getElementById('nk-modal-overlay').style.display = 'none';
+    pd.getElementById('nk-modal-iframe').src = '';
+  }
+
+  d.addEventListener('click', function(e){ if(e.target===d) doClose(); });
+  pd.getElementById('nk-modal-close-btn').addEventListener('click', doClose);
+
+  pw.openNKModal = function(src, title, linkUrl, linkText) {
     pd.getElementById('nk-modal-title').textContent = title || '';
     pd.getElementById('nk-modal-iframe').src = src;
     var f = pd.getElementById('nk-modal-footer');
@@ -112,12 +119,9 @@ _NK_MODAL_JS = """
       f.innerHTML = '<a href="'+linkUrl+'" target="_blank" rel="noopener">'+(linkText||linkUrl)+'</a>';
       f.style.display = 'block';
     } else { f.style.display = 'none'; }
-    o.style.display = 'flex';
+    pd.getElementById('nk-modal-overlay').style.display = 'flex';
   };
-  window.parent.closeNKModal = function() {
-    pd.getElementById('nk-modal-overlay').style.display = 'none';
-    pd.getElementById('nk-modal-iframe').src = '';
-  };
+  pw.closeNKModal = doClose;
 })();
 """
 
