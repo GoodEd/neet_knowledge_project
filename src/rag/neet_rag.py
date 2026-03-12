@@ -445,44 +445,22 @@ class NEETRAG:
         return deduped[:top_k]
 
     def _retrieve_docs_blended(self, question: str, top_k: int) -> List[Document]:
-        yt_slots = (top_k + 1) // 2
-        csv_slots = top_k - yt_slots
-        yt_fetch = max(yt_slots * 4, 20)
-        csv_fetch = max(csv_slots * 4, 20)
+        max_csv = min(top_k, 3)
+        csv_fetch = max(max_csv * 4, 20)
 
-        yt_scored = self.vector_manager.similarity_search_with_score(
-            question, k=yt_fetch, filter={"source_type": "youtube"}
-        )
         csv_scored = self.vector_manager.similarity_search_with_score(
             question, k=csv_fetch, filter={"source_type": "csv"}
         )
 
-        def _above_threshold(scored_list: List[tuple], slots: int) -> List[Document]:
-            filtered = []
-            for doc, score in scored_list:
-                if self._score_to_similarity(score) >= self.similarity_threshold:
-                    filtered.append((doc, score))
-            if not filtered:
-                filtered = scored_list[:slots]
-            merged = self._merge_rerank_docs(filtered, top_k=slots)
-            return self._dedupe_docs(merged)[:slots]
+        filtered = []
+        for doc, score in csv_scored:
+            if self._score_to_similarity(score) >= self.similarity_threshold:
+                filtered.append((doc, score))
+        if not filtered:
+            filtered = csv_scored[:max_csv]
 
-        yt_docs = _above_threshold(yt_scored, yt_slots)
-        csv_docs = _above_threshold(csv_scored, csv_slots)
-
-        blended: List[Document] = []
-        yi, ci = 0, 0
-        while len(blended) < top_k and (yi < len(yt_docs) or ci < len(csv_docs)):
-            if yi < len(yt_docs):
-                blended.append(yt_docs[yi])
-                yi += 1
-            if len(blended) >= top_k:
-                break
-            if ci < len(csv_docs):
-                blended.append(csv_docs[ci])
-                ci += 1
-
-        return blended[:top_k]
+        merged = self._merge_rerank_docs(filtered, top_k=max_csv)
+        return self._dedupe_docs(merged)[:max_csv]
 
     @staticmethod
     def _is_youtube_doc(doc: Document) -> bool:

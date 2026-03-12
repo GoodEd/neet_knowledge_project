@@ -197,19 +197,20 @@ class RAGPromptBuilder:
         self.default_system_prompt = system_prompt or self._get_default_system_prompt()
 
     def _get_default_system_prompt(self) -> str:
-        return """You are a helpful AI assistant specialized in helping NEET aspirants in India.
-You have access to a knowledge base containing study materials, video transcripts, and notes.
-Use the provided context to answer questions accurately and helpfully.
+        return """You are a NEET Previous Year Questions (PYQ) Assistant. Your role is to help NEET aspirants by analyzing matching PYQs from the knowledge base.
+
+When questions are found in context, provide:
+1. Types of questions asked on this topic (MCQ patterns, common question formats)
+2. Important concepts being tested
+3. Common mistakes to avoid
+4. Specific guidance for the chapter or topic
 
 Guidelines:
-- Be clear and concise in your answers
-- If the context doesn't contain enough information to answer, say so
-- Use bullet points when listing multiple items
-- For NEET-specific topics, provide accurate scientific information
-- When referencing a source, mention it by its video title (e.g. "as explained in <video title>"), never by document number
-- Do NOT say "Document 1", "Document 2", etc. in your answer
-- Use all provided context to form your answer, but only explicitly cite YouTube video sources by name
-- Use LaTeX with $...$ for inline math and $$...$$ for display math"""
+- Be as concise as possible — keep answers to 3-5 sentences max
+- If no relevant questions are found, say so briefly
+- Use LaTeX with $...$ for inline math and $$...$$ for display math
+- Do NOT say "Document 1", "Document 2", etc.
+- Do NOT repeat the full question text back to the student"""
 
     def build_prompt(
         self, query: str, context_docs: List[Any], include_sources: bool = True
@@ -222,10 +223,13 @@ Guidelines:
             source_type = meta.get("source_type") or meta.get("content_type", "")
 
             if source_type == "youtube":
-                title = meta.get("title", "")
-                label = f"Video: {title}" if title else f"Video source {i + 1}"
-            else:
-                label = f"Reference material"
+                continue
+
+            chapter = meta.get("chapter_name", "")
+            topic = meta.get("topic_names", "")
+            label = "Previous Year Question"
+            if chapter:
+                label += f" ({chapter})"
 
             context_part = f"--- {label} ---\n"
             context_part += f"Content: {content}\n"
@@ -234,32 +238,17 @@ Guidelines:
 
         context = "\n".join(context_parts)
 
+        if not context_parts:
+            return f"Question: {query}\n\nNo matching previous year questions found."
+
+        context = "\n".join(context_parts)
+
         prompt = f"""Context:
 {context}
 
 Question: {query}
 
-Please provide a helpful answer based on the context above."""
-
-        if include_sources:
-            sources = []
-            for doc in context_docs:
-                source = getattr(doc, "metadata", {}).get("source", "Unknown")
-                source_type = getattr(doc, "metadata", {}).get(
-                    "source_type"
-                ) or getattr(doc, "metadata", {}).get("content_type")
-                if source_type == "youtube":
-                    title = getattr(doc, "metadata", {}).get("title", "")
-                    start_time = getattr(doc, "metadata", {}).get("start_time", 0)
-                    if title:
-                        source_label = f"{title} (Time: {start_time}s)"
-                    else:
-                        source_label = source
-
-                    if source_label not in sources:
-                        sources.append(source_label)
-            if sources:
-                prompt += f"\n\nSources: {', '.join(sources)}"
+Analyze the PYQs above and provide concise guidance."""
 
         return prompt
 
