@@ -198,7 +198,7 @@ class RAGPromptBuilder:
 
     def _get_default_system_prompt(self) -> str:
         return """You are a helpful AI assistant specialized in helping NEET aspirants in India.
-You have access to a knowledge base containing study materials, video transcripts, and notes.
+You have access to a knowledge base containing previous year questions (PYQs), their explanations, chapters, and topics.
 Use the provided context to answer questions accurately and helpfully.
 
 Guidelines:
@@ -206,9 +206,7 @@ Guidelines:
 - If the context doesn't contain enough information to answer, say so
 - Use bullet points when listing multiple items
 - For NEET-specific topics, provide accurate scientific information
-- When referencing a source, mention it by its video title (e.g. "as explained in <video title>"), never by document number
 - Do NOT say "Document 1", "Document 2", etc. in your answer
-- Use all provided context to form your answer, but only explicitly cite YouTube video sources by name
 - Use LaTeX with $...$ for inline math and $$...$$ for display math"""
 
     def build_prompt(
@@ -224,15 +222,18 @@ Guidelines:
             if source_type == "youtube":
                 continue
 
-            label = "Reference material"
+            chapter = meta.get("chapter_name", "")
+            topic = meta.get("topic_names", "")
+            label = "Previous Year Question"
+            if chapter:
+                label += f" ({chapter})"
 
             context_part = f"--- {label} ---\n"
             context_part += f"Content: {content}\n"
-
             context_parts.append(context_part)
 
         if not context_parts:
-            return f"Question: {query}\n\nNo relevant information found in the knowledge base."
+            return f"Question: {query}\n\nNo matching previous year questions found."
 
         context = "\n".join(context_parts)
 
@@ -241,7 +242,7 @@ Guidelines:
 
 Question: {query}
 
-Please provide a helpful answer based on the context above."""
+Analyze the PYQs above and provide concise guidance."""
 
         return prompt
 
