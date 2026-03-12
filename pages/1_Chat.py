@@ -577,7 +577,7 @@ if st.session_state.image_context_text:
         st.success("Image context cleared.")
 
 chat_payload = st.chat_input(
-    "Ask a PYQ question and get its solution from your favourite teachers on youtube",
+    "Ask a PYQ question and get its solution from your favourite teachers on youtube as well guidance on how to approach such PYQs, related concepts and much more..",
     accept_file=True,
     file_type=["png", "jpg", "jpeg", "webp"],
     max_upload_size=5,
