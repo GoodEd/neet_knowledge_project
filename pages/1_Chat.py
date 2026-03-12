@@ -332,8 +332,7 @@ def render_source_item(src: dict, idx: int, key_prefix: str):
             )
     else:
         st.markdown(f"**Source {idx + 1} ({content_type}):** {source_url}")
-
-    st.text(src.get("content", ""))
+        st.text(src.get("content", ""))
 
 
 def _js_ask_assistant_button(question_text: str, idx: int = 0):
