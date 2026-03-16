@@ -1,0 +1,29 @@
+name: Tests
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: pip-${{ hashFiles('requirements.txt') }}
+          restore-keys: pip-
+
+      - run: pip install -r requirements.txt
+
+      - name: Type check
+        run: mypy --config-file mypy.ini
+
+      - name: Unit and integration tests
+        run: pytest tests/test_prompt_builder.py tests/test_composite_vector_store.py tests/test_neet_rag_integration.py -v

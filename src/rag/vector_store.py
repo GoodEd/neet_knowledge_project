@@ -1,4 +1,4 @@
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
 from pathlib import Path
 import contextlib
 import io
@@ -6,7 +6,7 @@ import logging
 import os
 
 from langchain_core.documents import Document
-from langchain_core.embeddings import FakeEmbeddings
+from langchain_core.embeddings import Embeddings, FakeEmbeddings
 from langchain_community.vectorstores import FAISS
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_openai import OpenAIEmbeddings
@@ -17,11 +17,11 @@ logger = logging.getLogger(__name__)
 class VectorStoreManager:
     def __init__(
         self,
-        persist_directory: str = None,
+        persist_directory: Optional[str] = None,
         embedding_provider: str = "huggingface",
         embedding_model: str = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
         embedding_dimension: int = 384,
-    ):
+    ) -> None:
         self.persist_directory = persist_directory or os.path.join(
             os.environ.get("DATA_DIR", "./data"), "faiss_index"
         )
@@ -29,11 +29,11 @@ class VectorStoreManager:
         self.embedding_model = embedding_model
         self.embedding_dimension = embedding_dimension
 
-        self.embeddings = None
-        self.vectorstore = None
+        self.embeddings: Optional[Embeddings] = None
+        self.vectorstore: Optional[FAISS] = None
         self._initialize_embeddings()
 
-    def _initialize_embeddings(self):
+    def _initialize_embeddings(self) -> None:
         if self.embedding_provider == "huggingface":
             os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
             os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
@@ -52,7 +52,8 @@ class VectorStoreManager:
                     self.embeddings = _build_hf_embeddings()
         elif self.embedding_provider == "openai":
             self.embeddings = OpenAIEmbeddings(
-                model="text-embedding-3-small", api_key=os.getenv("OPENAI_API_KEY")
+                model="text-embedding-3-small",
+                api_key=os.getenv("OPENAI_API_KEY"),  # type: ignore[arg-type]  # pyright: ignore[reportArgumentType]  # LangChain accepts raw str API keys at runtime
             )
         elif self.embedding_provider == "fake":
             self.embeddings = FakeEmbeddings(size=self.embedding_dimension)
@@ -63,33 +64,41 @@ class VectorStoreManager:
 
     def create_vectorstore(
         self, documents: List[Document], collection_name: str = "neet_knowledge"
-    ):
+    ) -> FAISS:
         if not documents:
             raise ValueError("No documents provided")
+        if self.embeddings is None:
+            raise ValueError("Embeddings not initialized")
+        embeddings = self.embeddings
+        assert embeddings is not None
 
         Path(self.persist_directory).mkdir(parents=True, exist_ok=True)
 
         self.vectorstore = FAISS.from_documents(
             documents=documents,
-            embedding=self.embeddings,
+            embedding=embeddings,
         )
         self.vectorstore.save_local(self.persist_directory)
 
         return self.vectorstore
 
-    def load_vectorstore(self, collection_name: str = "neet_knowledge"):
+    def load_vectorstore(self, collection_name: str = "neet_knowledge") -> FAISS:
         if not os.path.exists(self.persist_directory):
             raise FileNotFoundError(f"No vectorstore found at {self.persist_directory}")
+        if self.embeddings is None:
+            raise ValueError("Embeddings not initialized")
+        embeddings = self.embeddings
+        assert embeddings is not None
 
         self.vectorstore = FAISS.load_local(
             self.persist_directory,
-            self.embeddings,
+            embeddings,
             allow_dangerous_deserialization=True,
         )
 
         return self.vectorstore
 
-    def add_documents(self, documents: List[Document]):
+    def add_documents(self, documents: List[Document]) -> FAISS:
         if self.vectorstore is None:
             return self.create_vectorstore(documents)
 
@@ -114,7 +123,7 @@ class VectorStoreManager:
         k: int = 5,
         filter: Optional[Dict[str, Any]] = None,
         fetch_k: Optional[int] = None,
-    ) -> List[tuple]:
+    ) -> List[Tuple[Document, float]]:
         if self.vectorstore is None:
             raise ValueError(
                 "Vectorstore not initialized. Load or create a vectorstore first."
@@ -129,7 +138,7 @@ class VectorStoreManager:
 
         return self.vectorstore.similarity_search_with_score(**kwargs)
 
-    def delete_collection(self, collection_name: str = "neet_knowledge"):
+    def delete_collection(self, collection_name: str = "neet_knowledge") -> None:
         if os.path.exists(self.persist_directory):
             import shutil
 
@@ -161,8 +170,15 @@ class VectorStoreManager:
 
         if self.vectorstore is None:
             self.load_vectorstore()
+        if self.vectorstore is None:
+            return 0
+        if self.embeddings is None:
+            raise ValueError("Embeddings not initialized")
+        vectorstore = self.vectorstore
+        embeddings = self.embeddings
+        assert embeddings is not None
 
-        doc_map = getattr(self.vectorstore.docstore, "_dict", {})
+        doc_map = getattr(vectorstore.docstore, "_dict", {})
         all_docs = [doc for doc in doc_map.values() if isinstance(doc, Document)]
 
         keep_docs: List[Document] = []
@@ -183,7 +199,7 @@ class VectorStoreManager:
         if keep_docs:
             self.vectorstore = FAISS.from_documents(
                 documents=keep_docs,
-                embedding=self.embeddings,
+                embedding=embeddings,
             )
             self.vectorstore.save_local(self.persist_directory)
         else:
@@ -204,8 +220,15 @@ class VectorStoreManager:
 
         if self.vectorstore is None:
             self.load_vectorstore()
+        if self.vectorstore is None:
+            return 0
+        if self.embeddings is None:
+            raise ValueError("Embeddings not initialized")
+        vectorstore = self.vectorstore
+        embeddings = self.embeddings
+        assert embeddings is not None
 
-        doc_map = getattr(self.vectorstore.docstore, "_dict", {})
+        doc_map = getattr(vectorstore.docstore, "_dict", {})
         all_docs = [doc for doc in doc_map.values() if isinstance(doc, Document)]
 
         keep_docs: List[Document] = []
@@ -230,7 +253,7 @@ class VectorStoreManager:
         if keep_docs:
             self.vectorstore = FAISS.from_documents(
                 documents=keep_docs,
-                embedding=self.embeddings,
+                embedding=embeddings,
             )
             self.vectorstore.save_local(self.persist_directory)
         else:
@@ -300,13 +323,13 @@ class CompositeVectorStoreManager:
         return rest or None
 
     @property
-    def vectorstore(self):
+    def vectorstore(self) -> Optional[FAISS]:
         for mgr in self._managers.values():
             if mgr.vectorstore is not None:
                 return mgr.vectorstore
         return None
 
-    def load_vectorstore(self, collection_name: str = "neet_knowledge"):
+    def load_vectorstore(self, collection_name: str = "neet_knowledge") -> None:
         errors: List[str] = []
         for label, mgr in self._managers.items():
             try:
@@ -326,7 +349,7 @@ class CompositeVectorStoreManager:
 
     def create_vectorstore(
         self, documents: List[Document], collection_name: str = "neet_knowledge"
-    ):
+    ) -> None:
         buckets: Dict[str, List[Document]] = {k: [] for k in self._managers}
         for doc in documents:
             st = doc.metadata.get("source_type", self._default_source_type)
@@ -339,7 +362,7 @@ class CompositeVectorStoreManager:
                     docs, collection_name=collection_name
                 )
 
-    def add_documents(self, documents: List[Document]):
+    def add_documents(self, documents: List[Document]) -> None:
         buckets: Dict[str, List[Document]] = {k: [] for k in self._managers}
         for doc in documents:
             st = doc.metadata.get("source_type", self._default_source_type)
@@ -374,7 +397,7 @@ class CompositeVectorStoreManager:
         k: int = 5,
         filter: Optional[Dict[str, Any]] = None,
         fetch_k: Optional[int] = None,
-    ) -> List[tuple]:
+    ) -> List[Tuple[Document, float]]:
         target = self._manager_for_filter(filter)
         if target is not None:
             remaining_filter = self._strip_source_type_filter(filter)
@@ -382,7 +405,7 @@ class CompositeVectorStoreManager:
                 query=query, k=k, filter=remaining_filter, fetch_k=fetch_k
             )
 
-        all_scored: List[tuple] = []
+        all_scored: List[Tuple[Document, float]] = []
         for mgr in self._managers.values():
             if mgr.vectorstore is None:
                 continue
@@ -397,7 +420,7 @@ class CompositeVectorStoreManager:
         all_scored.sort(key=lambda pair: pair[1])
         return all_scored[:k]
 
-    def delete_collection(self, collection_name: str = "neet_knowledge"):
+    def delete_collection(self, collection_name: str = "neet_knowledge") -> None:
         for mgr in self._managers.values():
             mgr.delete_collection(collection_name=collection_name)
 
