@@ -45,3 +45,6 @@ redis>=4.0.0
 boto3>=1.34.0
 markdownify>=0.11.0
 pandas>=2.0.0
+
+# Type checking (dev)
+mypy>=1.10.0

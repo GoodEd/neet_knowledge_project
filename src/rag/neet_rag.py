@@ -1,4 +1,4 @@
-from typing import Dict, Any, List, Optional, Union
+from typing import Dict, Any, List, Optional, Union, Tuple
 from pathlib import Path
 import os
 import re
@@ -57,6 +57,7 @@ class NEETRAG:
         youtube_subdir = os.path.join(resolved_persist_dir, "youtube")
         csv_subdir = os.path.join(resolved_persist_dir, "csv")
         has_split_indexes = os.path.isdir(youtube_subdir) or os.path.isdir(csv_subdir)
+        self.vector_manager: Union[VectorStoreManager, CompositeVectorStoreManager]
 
         if has_split_indexes:
             self.vector_manager = build_composite_manager(
@@ -80,7 +81,7 @@ class NEETRAG:
         self.prompt_builder = RAGPromptBuilder()
         self._vectorstore_loaded = False
         self.logger = logging.getLogger(__name__)
-        self._source_manager = None
+        self._source_manager: Optional[Any] = None
         self._source_title_cache: Dict[str, str] = {}
 
     @staticmethod
@@ -97,7 +98,7 @@ class NEETRAG:
             return False
         return True
 
-    def _get_source_manager(self):
+    def _get_source_manager(self) -> Optional[Any]:
         if self._source_manager is not None:
             return self._source_manager
         try:
@@ -360,6 +361,7 @@ class NEETRAG:
         deduped = []
         seen = set()
         for doc in docs:
+            key: Tuple[Any, ...]
             source_type = doc.metadata.get("source_type") or doc.metadata.get(
                 "content_type", ""
             )
@@ -464,8 +466,8 @@ class NEETRAG:
 
     @staticmethod
     def _is_youtube_doc(doc: Document) -> bool:
-        source_type = doc.metadata.get("source_type") or doc.metadata.get(
-            "content_type", ""
+        source_type = str(
+            doc.metadata.get("source_type") or doc.metadata.get("content_type", "")
         )
         return source_type == "youtube"
 
@@ -756,6 +758,6 @@ class NEETRAG:
         except Exception as e:
             return {"error": str(e)}
 
-    def reset_knowledge_base(self):
+    def reset_knowledge_base(self) -> None:
         self.vector_manager.delete_collection()
         self._vectorstore_loaded = False

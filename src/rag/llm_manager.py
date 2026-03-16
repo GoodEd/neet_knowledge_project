@@ -1,4 +1,4 @@
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, cast
 import os
 import base64
 
@@ -10,13 +10,13 @@ class LLMManager:
         model: str = "llama3.2",
         api_key: Optional[str] = None,
         base_url: Optional[str] = None,
-    ):
+    ) -> None:
         self.provider = provider
         self.model = model
-        self.llm = None
+        self.llm: Optional[Any] = None
         self._initialize_llm(api_key, base_url)
 
-    def _initialize_llm(self, api_key: Optional[str], base_url: Optional[str]):
+    def _initialize_llm(self, api_key: Optional[str], base_url: Optional[str]) -> None:
         if self.provider == "ollama":
             try:
                 from langchain_community.llms import Ollama
@@ -33,7 +33,7 @@ class LLMManager:
 
                 self.llm = ChatOpenAI(
                     model=self.model,
-                    api_key=api_key or os.getenv("OPENAI_API_KEY"),
+                    api_key=api_key or os.getenv("OPENAI_API_KEY"),  # type: ignore[arg-type]  # LangChain accepts raw str API keys at runtime
                     base_url=base_url or os.getenv("OPENAI_BASE_URL"),
                     temperature=0.7,
                 )
@@ -44,9 +44,9 @@ class LLMManager:
             try:
                 from langchain_anthropic import ChatAnthropic
 
-                self.llm = ChatAnthropic(
+                self.llm = ChatAnthropic(  # type: ignore[call-arg]  # Runtime accepts model kwarg; stubs may differ
                     model=self.model,
-                    api_key=api_key or os.getenv("ANTHROPIC_API_KEY"),
+                    api_key=api_key or os.getenv("ANTHROPIC_API_KEY"),  # type: ignore[arg-type]  # LangChain accepts raw str API keys at runtime
                     temperature=0.7,
                 )
             except ImportError:
@@ -115,7 +115,7 @@ class LLMManager:
 
         response = self.llm.invoke(prompt)
         if hasattr(response, "content"):
-            return response.content
+            return cast(str, response.content)
         return str(response)
 
     def extract_image_context(
