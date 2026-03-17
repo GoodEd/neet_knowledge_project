@@ -14,7 +14,10 @@ from dotenv import load_dotenv
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.utils.rag_singleton import get_rag_system
-from src.utils.answer_formatting import format_assistant_answer_for_streamlit
+from src.utils.answer_formatting import (
+    format_assistant_answer_for_streamlit,
+    format_chat_message_for_streamlit,
+)
 from src.utils.ui_helpers import setup_public_page_chrome
 
 load_dotenv()
@@ -543,7 +546,9 @@ for message_idx, message in enumerate(st.session_state.messages):
         last_user_query = message["content"]
 
     with st.chat_message(message["role"]):
-        st.markdown(format_assistant_answer_for_streamlit(message["content"]))
+        st.markdown(
+            format_chat_message_for_streamlit(message["role"], message["content"])
+        )
 
         if message["role"] == "assistant" and (
             message.get("sources") or message.get("question_sources")

@@ -1,8 +1,16 @@
 import re
-from collections.abc import Iterable
 
-from bs4 import BeautifulSoup, Tag
-from bs4.element import NavigableString, PageElement
+
+_SCRIPT_STYLE_BLOCK_PATTERN = re.compile(
+    r"<(script|style)\b[^>]*>.*?</\1>", re.IGNORECASE | re.DOTALL
+)
+_LINE_BREAK_PATTERN = re.compile(r"<br\s*/?>", re.IGNORECASE)
+_SUPPORTED_TAG_PATTERNS = {
+    "bold": re.compile(r"<(b|strong)\b[^>]*>(.*?)</\1>", re.IGNORECASE | re.DOTALL),
+    "italic": re.compile(r"<(i|em)\b[^>]*>(.*?)</\1>", re.IGNORECASE | re.DOTALL),
+    "sup": re.compile(r"<sup\b[^>]*>(.*?)</sup>", re.IGNORECASE | re.DOTALL),
+    "sub": re.compile(r"<sub\b[^>]*>(.*?)</sub>", re.IGNORECASE | re.DOTALL),
+}
 
 
 _SUPERSCRIPT_MAP = {
@@ -74,41 +82,28 @@ def _render_with_map(text: str, mapping: dict[str, str], fallback_prefix: str) -
     return f"{fallback_prefix}({cleaned})" if cleaned else ""
 
 
-def _render_node(node: PageElement) -> str:
-    if isinstance(node, NavigableString):
-        return str(node)
-    if not isinstance(node, Tag):
-        return str(node)
-
-    name = (node.name or "").lower()
-    children = "".join(_render_node(child) for child in node.children)
-
-    if name == "br":
-        return "\n"
-    if name in {"b", "strong"}:
-        return f"**{children.strip()}**"
-    if name in {"i", "em"}:
-        return f"*{children.strip()}*"
-    if name == "sup":
-        return _render_with_map(children, _SUPERSCRIPT_MAP, "^")
-    if name == "sub":
-        return _render_with_map(children, _SUBSCRIPT_MAP, "_")
-    return children
-
-
-def _render_soup(nodes: Iterable[PageElement]) -> str:
-    return "".join(_render_node(node) for node in nodes)
-
-
 def _normalize_html_like_tags(text: str) -> str:
     if "<" not in text or ">" not in text:
         return text
 
-    soup = BeautifulSoup(text, "html.parser")
-    for tag in soup.find_all(["script", "style"]):
-        tag.decompose()
+    normalized = _SCRIPT_STYLE_BLOCK_PATTERN.sub("", text)
+    normalized = _LINE_BREAK_PATTERN.sub("\n", normalized)
 
-    normalized = _render_soup(soup.contents)
+    normalized = _SUPPORTED_TAG_PATTERNS["bold"].sub(
+        lambda match: f"**{match.group(2).strip()}**", normalized
+    )
+    normalized = _SUPPORTED_TAG_PATTERNS["italic"].sub(
+        lambda match: f"*{match.group(2).strip()}*", normalized
+    )
+    normalized = _SUPPORTED_TAG_PATTERNS["sup"].sub(
+        lambda match: _render_with_map(match.group(1), _SUPERSCRIPT_MAP, "^"),
+        normalized,
+    )
+    normalized = _SUPPORTED_TAG_PATTERNS["sub"].sub(
+        lambda match: _render_with_map(match.group(1), _SUBSCRIPT_MAP, "_"),
+        normalized,
+    )
+
     normalized = re.sub(r"[ \t]+\n", "\n", normalized)
     normalized = re.sub(r"\n[ \t]+", "\n", normalized)
     normalized = re.sub(r"[ \t]{2,}", " ", normalized)
@@ -118,3 +113,9 @@ def _normalize_html_like_tags(text: str) -> str:
 def format_assistant_answer_for_streamlit(text: str) -> str:
     normalized = _normalize_html_like_tags(text)
     return _normalize_latex_delimiters(normalized)
+
+
+def format_chat_message_for_streamlit(role: str, text: str) -> str:
+    if role != "assistant":
+        return text
+    return format_assistant_answer_for_streamlit(text)

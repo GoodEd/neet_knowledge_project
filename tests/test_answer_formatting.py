@@ -29,14 +29,32 @@ class TestAssistantAnswerFormatting(unittest.TestCase):
         self.assertIn("ΔH_(xyz) = 0", formatted)
         self.assertIn("x^(ab)", formatted)
 
-    def test_normalize_assistant_answer_strips_unknown_tags_and_scripts(self):
+    def test_normalize_assistant_answer_strips_scripts_without_rewriting_literals(self):
         from src.utils.answer_formatting import format_assistant_answer_for_streamlit
 
-        raw = "<div>Use <span>work-energy theorem</span></div><script>alert(1)</script>"
+        raw = "Use work-energy theorem<script>alert(1)</script> safely."
 
         formatted = format_assistant_answer_for_streamlit(raw)
 
-        self.assertEqual(formatted, "Use work-energy theorem")
+        self.assertEqual(formatted, "Use work-energy theorem safely.")
+
+    def test_normalize_assistant_answer_preserves_literal_supported_tag_text(self):
+        from src.utils.answer_formatting import format_assistant_answer_for_streamlit
+
+        raw = "The literal token is <sup> in HTML and should stay visible."
+
+        formatted = format_assistant_answer_for_streamlit(raw)
+
+        self.assertEqual(formatted, raw)
+
+    def test_format_chat_message_leaves_user_text_unchanged(self):
+        from src.utils.answer_formatting import format_chat_message_for_streamlit
+
+        raw = "What does <b> mean in HTML?"
+
+        formatted = format_chat_message_for_streamlit("user", raw)
+
+        self.assertEqual(formatted, raw)
 
     def test_prompt_builder_explicitly_forbids_html_tags(self):
         from src.rag.llm_manager import RAGPromptBuilder
