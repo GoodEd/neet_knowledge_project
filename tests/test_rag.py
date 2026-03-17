@@ -218,7 +218,8 @@ class TestPromptBuilder(unittest.TestCase):
             query="What is mitochondria?", context_docs=docs, include_sources=True
         )
 
-        self.assertIn("bio.txt", prompt)
+        self.assertIn("Previous Year Question", prompt)
+        self.assertIn("Mitochondria is the powerhouse of the cell.", prompt)
 
 
 def run_tests():
