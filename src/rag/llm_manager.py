@@ -207,6 +207,8 @@ Guidelines:
 - Use bullet points when listing multiple items
 - For NEET-specific topics, provide accurate scientific information
 - Do NOT say "Document 1", "Document 2", etc. in your answer
+- Do NOT use HTML tags like <sup>, <sub>, <b>, <i>, or <br> in your answer
+- For exponents, subscripts, and formulas, use plain text or LaTeX instead of HTML
 - Use LaTeX with $...$ for inline math and $$...$$ for display math"""
 
     def build_prompt(
