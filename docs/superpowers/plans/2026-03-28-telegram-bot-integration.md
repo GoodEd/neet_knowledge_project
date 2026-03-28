@@ -29,15 +29,18 @@ Append to `requirements.txt` after the existing `# Utilities` block:
 ```
 # Telegram Bot
 python-telegram-bot>=21.0
+
+# Testing (async)
+pytest-asyncio>=0.23.0
 ```
 
 - [ ] **Step 2: Add TELEGRAM_BOT_TOKEN to .env**
 
-Append to `.env`:
+Append to `.env` (use your actual token from BotFather — never commit this file):
 
 ```bash
 # Telegram Bot Configuration
-TELEGRAM_BOT_TOKEN=8633678117:AAEGrPEwSpzSL2YRylX9h-yHpK2QWL5gAHM
+TELEGRAM_BOT_TOKEN=<your-bot-token-from-botfather>
 ```
 
 - [ ] **Step 3: Add placeholder to .env.example**
@@ -52,7 +55,7 @@ TELEGRAM_BOT_TOKEN=
 
 - [ ] **Step 4: Create telegram_bot package**
 
-Create `src/telegram_bot/__init__.py`:
+Create `src/telegram_bot/__init__.py` (empty for now — export added in Task 7 after bot.py exists):
 
 ```python
 """Telegram bot interface for the NEET PYQ Assistant."""
@@ -60,8 +63,8 @@ Create `src/telegram_bot/__init__.py`:
 
 - [ ] **Step 5: Install the dependency**
 
-Run: `pip install "python-telegram-bot>=21.0"`
-Expected: Successfully installed python-telegram-bot-21.x
+Run: `pip install "python-telegram-bot>=21.0" "pytest-asyncio>=0.23.0"`
+Expected: Successfully installed python-telegram-bot-21.x, pytest-asyncio-0.2x
 
 - [ ] **Step 6: Commit**
 
@@ -275,6 +278,21 @@ class TestSplitMessage:
         result = split_message(text, max_length=4096)
         assert result[0].endswith("A")
         assert result[1].startswith("B")
+
+    def test_split_does_not_break_mid_html_tag(self):
+        from src.telegram_bot.formatting import split_message
+
+        # Place an <a> tag right at the split boundary
+        prefix = "X" * 4080
+        tag = '<a href="url">link</a>'
+        text = prefix + tag
+        result = split_message(text, max_length=4096)
+        # The tag must not be split across parts
+        combined = "".join(result)
+        assert tag in combined
+        # Each part must not contain a partial tag
+        for part in result:
+            assert part.count("<a") == part.count("</a>") or "<a" not in part
 ```
 
 - [ ] **Step 2: Run tests to verify they fail**
@@ -419,18 +437,25 @@ def format_response(rag_result: dict[str, Any]) -> list[str]:
 
 
 def split_message(text: str, max_length: int = MAX_MESSAGE_LENGTH) -> list[str]:
-    """Split long text into parts, preferring newline boundaries."""
+    """Split long text into parts, preserving HTML tag boundaries."""
     if len(text) <= max_length:
         return [text]
 
     parts: list[str] = []
     remaining = text
     while len(remaining) > max_length:
-        # Find last newline within limit
         split_at = remaining.rfind("\n", 0, max_length)
         if split_at <= 0:
-            # No newline found — hard split
             split_at = max_length
+
+        # Don't split inside an HTML tag — back up to before the tag opener
+        # Check if we're inside a < > sequence
+        last_open = remaining.rfind("<", 0, split_at)
+        last_close = remaining.rfind(">", 0, split_at)
+        if last_open > last_close and last_open > 0:
+            # We're inside a tag — back up to before it
+            split_at = last_open
+
         parts.append(remaining[:split_at])
         remaining = remaining[split_at:].lstrip("\n")
 
@@ -631,21 +656,42 @@ class TelegramChatHistory:
         self._redis: Optional[redis.Redis] = None
 
         url = redis_url or os.getenv("REDIS_URL", "redis://localhost:6379/0")
-        try:
-            client = redis.from_url(
-                url,
+        self._redis = self._connect_redis(url)
+
+    @staticmethod
+    def _connect_redis(url: str) -> Optional[redis.Redis]:
+        """Connect to Redis with TLS fallback (matches pages/1_Chat.py pattern)."""
+        from urllib.parse import urlparse
+
+        def _build(u: str) -> redis.Redis:
+            return redis.from_url(
+                u,
                 socket_connect_timeout=2,
                 socket_timeout=2,
                 retry_on_timeout=False,
             )
+
+        try:
+            client = _build(url)
             client.ping()
-            self._redis = client
             logger.info("Telegram history: Redis connected at %s", url)
+            return client
         except Exception:
+            # TLS fallback: try rediss:// if redis:// failed
+            parsed = urlparse(url)
+            if parsed.scheme == "redis":
+                tls_url = url.replace("redis://", "rediss://", 1)
+                try:
+                    client = _build(tls_url)
+                    client.ping()
+                    logger.info("Telegram history: Redis TLS connected at %s", tls_url)
+                    return client
+                except Exception:
+                    pass
             logger.warning(
                 "Telegram history: Redis unavailable at %s — history disabled", url
             )
-            self._redis = None
+            return None
 
     def _key(self, user_id: int) -> str:
         return f"telegram_chat:{user_id}"
@@ -976,6 +1022,20 @@ class TestHandlePhoto:
         assert "QUESTION: biology cell division" in query
 
     @pytest.mark.asyncio
+    async def test_image_download_failure_returns_friendly_message(self):
+        from src.telegram_bot.bot import handle_photo
+
+        update = _make_photo_update()
+        context = _make_context()
+        context.bot.get_file.side_effect = Exception("Network timeout")
+
+        await handle_photo(update, context)
+
+        msg = update.message.reply_text.call_args[0][0]
+        assert "couldn't download" in msg.lower() or "image" in msg.lower()
+        assert "Network timeout" not in msg
+
+    @pytest.mark.asyncio
     async def test_image_extraction_error_returns_friendly_message(self):
         from src.telegram_bot.bot import handle_photo
 
@@ -989,14 +1049,38 @@ class TestHandlePhoto:
         msg = update.message.reply_text.call_args[0][0]
         assert "couldn't read" in msg.lower() or "image" in msg.lower()
         assert "Vision API" not in msg
+
+
+class TestHistoryBoundary:
+    """Verify that save_turn stores raw text, not formatted HTML."""
+
+    @pytest.mark.asyncio
+    async def test_save_turn_receives_raw_answer_not_html(self):
+        from src.telegram_bot.bot import handle_message
+
+        rag = _make_mock_rag(
+            answer="The answer has H<sub>2</sub>O and 10<sup>2</sup>",
+            sources=[{"content_type": "youtube", "title": "T",
+                      "timestamp_url": "https://youtube.com/watch?v=x",
+                      "timestamp_label": ""}],
+        )
+        history = _make_mock_history()
+        update = _make_text_update("What is water?", user_id=42)
+        context = _make_context(rag=rag, history=history)
+
+        await handle_message(update, context)
+
+        # History must receive the raw answer, not formatted HTML
+        save_call = history.save_turn.call_args[1]
+        saved_answer = save_call["assistant_message"]
+        # Raw answer still has <sub>/<sup> — it's the RAG output, not Telegram HTML
+        assert saved_answer == "The answer has H<sub>2</sub>O and 10<sup>2</sup>"
+        # The reply to user IS formatted (different from what's saved)
+        reply = update.message.reply_text.call_args[0][0]
+        assert "₂" in reply or "<sub>" not in reply  # formatted version
 ```
 
-- [ ] **Step 2: Install pytest-asyncio**
-
-Run: `pip install pytest-asyncio`
-Expected: Successfully installed
-
-- [ ] **Step 3: Run tests to verify they fail**
+- [ ] **Step 2: Run tests to verify they fail**
 
 Run: `pytest tests/test_telegram_bot.py -v`
 Expected: FAIL — `ModuleNotFoundError: No module named 'src.telegram_bot.bot'`
@@ -1274,19 +1358,40 @@ async def handle_photo(
 async def error_handler(
     update: object, context: ContextTypes.DEFAULT_TYPE
 ) -> None:
-    """Global error handler — log error, never expose to user."""
+    """Global error handler — log error, send user-friendly message."""
     logger.error("Unhandled exception: %s", context.error, exc_info=context.error)
+    # Try to notify the user if we have a valid message context
+    if isinstance(update, Update) and update.effective_chat:
+        try:
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text=_ERR_GENERIC,
+            )
+        except Exception:
+            logger.warning("Could not send error message to user")
 ```
 
-- [ ] **Step 2: Run tests to verify they pass**
+- [ ] **Step 2: Update `__init__.py` to export `create_application`**
+
+Replace contents of `src/telegram_bot/__init__.py`:
+
+```python
+"""Telegram bot interface for the NEET PYQ Assistant."""
+
+from src.telegram_bot.bot import create_application
+
+__all__ = ["create_application"]
+```
+
+- [ ] **Step 3: Run tests to verify they pass**
 
 Run: `pytest tests/test_telegram_bot.py -v`
-Expected: All ~14 tests PASS
+Expected: All tests PASS
 
-- [ ] **Step 3: Commit**
+- [ ] **Step 4: Commit**
 
 ```bash
-git add src/telegram_bot/bot.py tests/test_telegram_bot.py
+git add src/telegram_bot/bot.py src/telegram_bot/__init__.py tests/test_telegram_bot.py
 git commit -m "feat(telegram): add bot handlers with TDD tests"
 ```
 
@@ -1555,19 +1660,16 @@ Expected: Bot shows "typing...", then replies with an answer + YouTube video lin
 Send a photo of a NEET question (from textbook or phone screenshot).
 Expected: Bot shows "typing...", extracts the question, queries RAG, and replies with an answer.
 
-- [ ] **Step 5: Final commit with all files**
+- [ ] **Step 5: Final test suite run and verify clean state**
 
-Run full test suite one more time:
+Run full test suite:
 ```bash
 pytest tests/test_telegram_*.py -v
 ```
+Expected: All ~41 tests PASS
 
-If all pass:
-```bash
-git add -A
-git status  # verify only expected files
-git commit -m "feat(telegram): complete Telegram bot integration (Phase 1 — polling mode)"
-```
+Run: `git status`
+Expected: Working tree clean (all changes committed in earlier tasks). If any unstaged changes remain, stage and commit them now.
 
 - [ ] **Step 6: Verify git log**
 
