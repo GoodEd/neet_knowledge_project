@@ -2,7 +2,13 @@ import asyncio
 import logging
 from typing import Any, Mapping
 
-from telegram import LinkPreviewOptions, Update
+from telegram import (
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    LinkPreviewOptions,
+    Update,
+    WebAppInfo,
+)
 from telegram.constants import ChatAction, ParseMode
 from telegram.ext import (
     Application,
@@ -76,6 +82,24 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     _ = await message.reply_text(help_text, parse_mode=ParseMode.HTML)
 
 
+def _build_question_buttons(
+    question_sources: list[dict],
+) -> InlineKeyboardMarkup | None:
+    buttons = []
+    for src in question_sources:
+        qid = str(src.get("question_id") or "")
+        if not qid:
+            continue
+        label = str(src.get("content") or src.get("title") or f"Question {qid}")
+        if len(label) > 40:
+            label = label[:37] + "..."
+        url = f"https://neetprep.com/epubQuestion/{qid}"
+        buttons.append([InlineKeyboardButton(text=label, web_app=WebAppInfo(url=url))])
+        if len(buttons) >= 5:
+            break
+    return InlineKeyboardMarkup(buttons) if buttons else None
+
+
 def _extract_first_youtube_url(sources: list[dict]) -> str:
     for src in sources:
         url = src.get("timestamp_url") or src.get("source") or ""
@@ -85,9 +109,14 @@ def _extract_first_youtube_url(sources: list[dict]) -> str:
 
 
 async def _send_reply_parts(
-    message: Any, parts: list[str], sources: list[dict]
+    message: Any,
+    parts: list[str],
+    sources: list[dict],
+    question_sources: list[dict] | None = None,
 ) -> None:
     preview_url = _extract_first_youtube_url(sources)
+    keyboard = _build_question_buttons(question_sources or [])
+    last_idx = len(parts) - 1
     for i, part in enumerate(parts):
         link_preview = None
         if i == 0 and preview_url:
@@ -98,8 +127,12 @@ async def _send_reply_parts(
             )
         elif i > 0:
             link_preview = LinkPreviewOptions(is_disabled=True)
+        reply_markup = keyboard if i == last_idx and keyboard else None
         _ = await message.reply_text(
-            part, parse_mode=ParseMode.HTML, link_preview_options=link_preview
+            part,
+            parse_mode=ParseMode.HTML,
+            link_preview_options=link_preview,
+            reply_markup=reply_markup,
         )
 
 
@@ -146,12 +179,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
         raw_answer = str(result.get("answer", ""))
         sources = result.get("sources", [])
+        q_sources = result.get("question_sources", [])
         parts = format_response(
             answer_text=raw_answer,
             youtube_sources=sources,
-            question_sources=result.get("question_sources", []),
+            question_sources=q_sources,
         )
-        await _send_reply_parts(message, parts, sources)
+        await _send_reply_parts(message, parts, sources, q_sources)
 
         history.save_turn(
             user_id=user_id,
@@ -222,12 +256,13 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
         raw_answer = str(result.get("answer", ""))
         sources = result.get("sources", [])
+        q_sources = result.get("question_sources", [])
         parts = format_response(
             answer_text=raw_answer,
             youtube_sources=sources,
-            question_sources=result.get("question_sources", []),
+            question_sources=q_sources,
         )
-        await _send_reply_parts(message, parts, sources)
+        await _send_reply_parts(message, parts, sources, q_sources)
 
         history.save_turn(
             user_id=user_id,
