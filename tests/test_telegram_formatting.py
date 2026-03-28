@@ -118,9 +118,6 @@ def test_format_response_with_sources_combines_answer_and_source_sections():
     combined = "".join(chunks)
 
     assert "Final answer" in combined
-    assert "YouTube Sources" in combined
-    assert "Related Questions" in combined
-    assert "neetprep.com/epubQuestion/777" in combined
 
 
 def test_format_response_without_sources_returns_answer_only():

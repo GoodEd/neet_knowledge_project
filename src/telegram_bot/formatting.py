@@ -169,15 +169,6 @@ def format_response(
     max_length: int = 4096,
 ) -> list[str]:
     full_text = format_answer_text(answer_text)
-
-    youtube_block = format_youtube_sources(youtube_sources or [])
-    if youtube_block:
-        full_text += f"\n\n<b>YouTube Sources</b>\n{youtube_block}"
-
-    question_block = format_question_sources(question_sources or [])
-    if question_block:
-        full_text += f"\n\n<b>Related Questions</b>\n{question_block}"
-
     return split_message(full_text, max_length=max_length)
 
 

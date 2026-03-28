@@ -82,28 +82,44 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     _ = await message.reply_text(help_text, parse_mode=ParseMode.HTML)
 
 
-def _build_question_buttons(
+def _build_source_buttons(
+    youtube_sources: list[dict],
     question_sources: list[dict],
 ) -> InlineKeyboardMarkup | None:
-    buttons = []
-    for src in question_sources:
+    buttons: list[list[InlineKeyboardButton]] = []
+
+    for i, src in enumerate(youtube_sources[:5], start=1):
+        url = str(src.get("timestamp_url") or src.get("source") or "")
+        if not url:
+            continue
+        buttons.append(
+            [
+                InlineKeyboardButton(
+                    text=f"\u25b6\ufe0f Video #{i}", web_app=WebAppInfo(url=url)
+                )
+            ]
+        )
+
+    for i, src in enumerate(question_sources[:5], start=1):
         qid = str(src.get("question_id") or "")
         if not qid:
             continue
-        label = str(src.get("content") or src.get("title") or f"Question {qid}")
-        if len(label) > 40:
-            label = label[:37] + "..."
         url = f"https://neetprep.com/epubQuestion/{qid}"
-        buttons.append([InlineKeyboardButton(text=label, web_app=WebAppInfo(url=url))])
-        if len(buttons) >= 5:
-            break
+        buttons.append(
+            [
+                InlineKeyboardButton(
+                    text=f"\ud83d\udcdd Question #{i}", web_app=WebAppInfo(url=url)
+                )
+            ]
+        )
+
     return InlineKeyboardMarkup(buttons) if buttons else None
 
 
 def _extract_first_youtube_url(sources: list[dict]) -> str:
     for src in sources:
         url = src.get("timestamp_url") or src.get("source") or ""
-        if url and "youtube.com" in url or "youtu.be" in url:
+        if url and ("youtube.com" in url or "youtu.be" in url):
             return url
     return ""
 
@@ -115,7 +131,7 @@ async def _send_reply_parts(
     question_sources: list[dict] | None = None,
 ) -> None:
     preview_url = _extract_first_youtube_url(sources)
-    keyboard = _build_question_buttons(question_sources or [])
+    keyboard = _build_source_buttons(sources, question_sources or [])
     last_idx = len(parts) - 1
     for i, part in enumerate(parts):
         link_preview = None

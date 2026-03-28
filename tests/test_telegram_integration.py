@@ -25,13 +25,14 @@ class TestTextEndToEnd:
             sources=[
                 {
                     "title": "Cell Division Lecture",
-                    "url": "https://www.youtube.com/watch?v=abc123",
-                    "timestamp": "01:30",
+                    "timestamp_url": "https://www.youtube.com/watch?v=abc123&t=90",
+                    "source": "https://www.youtube.com/watch?v=abc123",
+                    "timestamp_label": "01:30",
                 }
             ],
             question_sources=[
                 {
-                    "id": 101,
+                    "question_id": "101",
                     "question": "Which phase includes chromosome alignment?",
                 }
             ],
@@ -46,10 +47,8 @@ class TestTextEndToEnd:
         kwargs = update.message.reply_text.call_args.kwargs
 
         assert kwargs.get("parse_mode") == "HTML"
-        assert "<b>YouTube Sources</b>" in reply
-        assert "https://www.youtube.com/watch?v=abc123&amp;t=90" in reply
-        assert "<b>Related Questions</b>" in reply
-        assert "https://neetprep.com/epubQuestion/101" in reply
+        assert "Mitosis creates two identical daughter cells." in reply
+        assert kwargs.get("reply_markup") is not None
 
 
 class TestPhotoEndToEnd:
