@@ -28,6 +28,8 @@ _PAREN_LATEX_PATTERN = re.compile(r"\\\((.+?)\\\)", re.DOTALL)
 _BRACKET_LATEX_PATTERN = re.compile(r"\\\[(.+?)\\\]", re.DOTALL)
 _SUP_PATTERN = re.compile(r"<sup\b[^>]*>(.*?)</sup>", re.IGNORECASE | re.DOTALL)
 _SUB_PATTERN = re.compile(r"<sub\b[^>]*>(.*?)</sub>", re.IGNORECASE | re.DOTALL)
+_MD_BOLD_PATTERN = re.compile(r"\*\*(.+?)\*\*", re.DOTALL)
+_MD_ITALIC_PATTERN = re.compile(r"(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)")
 
 
 def _render_with_map(text: str, mapping: dict[str, str]) -> str:
@@ -57,10 +59,18 @@ def _convert_sup_sub(text: str) -> str:
     return converted
 
 
+def _convert_markdown_to_html(text: str) -> str:
+    converted = _MD_BOLD_PATTERN.sub(r"<b>\1</b>", text)
+    converted = _MD_ITALIC_PATTERN.sub(r"<i>\1</i>", converted)
+    converted = re.sub(r"^(\s*)\*\s+", r"\1" + "\u2022 ", converted, flags=re.MULTILINE)
+    return converted
+
+
 def format_answer_text(answer_text: str) -> str:
     converted = _convert_sup_sub(answer_text)
     latex_stripped = _strip_latex_delimiters(converted)
-    return html_escape(latex_stripped)
+    escaped = html_escape(latex_stripped)
+    return _convert_markdown_to_html(escaped)
 
 
 def _parse_timestamp_to_seconds(timestamp: str) -> int | None:
@@ -87,15 +97,22 @@ def format_youtube_sources(sources: list[YouTubeSource]) -> str:
     lines: list[str] = []
     for index, source in enumerate(sources, start=1):
         raw_title = str(source.get("title") or f"YouTube Source {index}")
-        raw_url = str(source.get("url") or "")
-        timestamp = source.get("timestamp")
+        raw_url = str(
+            source.get("timestamp_url")
+            or source.get("url")
+            or source.get("source")
+            or ""
+        )
+        timestamp = source.get("timestamp_label") or source.get("timestamp")
 
         if isinstance(timestamp, str) and timestamp.strip():
-            seconds = _parse_timestamp_to_seconds(timestamp.strip())
-            if seconds is not None:
-                separator = "&" if "?" in raw_url else "?"
-                raw_url = f"{raw_url}{separator}t={seconds}"
-                raw_title = f"{raw_title} ({timestamp.strip()})"
+            ts_display = timestamp.strip()
+            if "t=" not in raw_url:
+                seconds = _parse_timestamp_to_seconds(ts_display)
+                if seconds is not None:
+                    separator = "&" if "?" in raw_url else "?"
+                    raw_url = f"{raw_url}{separator}t={seconds}"
+            raw_title = f"{raw_title} ({ts_display})"
 
         escaped_title = html_escape(raw_title)
         escaped_url = html_escape(raw_url, quote=True)
@@ -110,7 +127,7 @@ def format_question_sources(sources: list[QuestionSource]) -> str:
 
     lines: list[str] = []
     for index, source in enumerate(sources, start=1):
-        question_id = str(source.get("id") or "")
+        question_id = str(source.get("question_id") or source.get("id") or "")
         raw_title = str(
             source.get("question") or source.get("title") or f"Question {index}"
         )
