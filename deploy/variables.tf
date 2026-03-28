@@ -222,3 +222,9 @@ variable "ask_assistant_enabled" {
   type    = string
   default = "0"
 }
+
+variable "telegram_bot_token_secret_arn" {
+  description = "Secrets Manager ARN for TELEGRAM_BOT_TOKEN. Leave empty to disable the Telegram bot."
+  type        = string
+  default     = ""
+}
