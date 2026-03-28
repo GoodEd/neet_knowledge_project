@@ -2,7 +2,7 @@ import asyncio
 import logging
 from typing import Any, Mapping
 
-from telegram import Update
+from telegram import LinkPreviewOptions, Update
 from telegram.constants import ChatAction, ParseMode
 from telegram.ext import (
     Application,
@@ -76,6 +76,33 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     _ = await message.reply_text(help_text, parse_mode=ParseMode.HTML)
 
 
+def _extract_first_youtube_url(sources: list[dict]) -> str:
+    for src in sources:
+        url = src.get("timestamp_url") or src.get("source") or ""
+        if url and "youtube.com" in url or "youtu.be" in url:
+            return url
+    return ""
+
+
+async def _send_reply_parts(
+    message: Any, parts: list[str], sources: list[dict]
+) -> None:
+    preview_url = _extract_first_youtube_url(sources)
+    for i, part in enumerate(parts):
+        link_preview = None
+        if i == 0 and preview_url:
+            link_preview = LinkPreviewOptions(
+                url=preview_url,
+                prefer_large_media=True,
+                show_above_text=True,
+            )
+        elif i > 0:
+            link_preview = LinkPreviewOptions(is_disabled=True)
+        _ = await message.reply_text(
+            part, parse_mode=ParseMode.HTML, link_preview_options=link_preview
+        )
+
+
 async def _send_typing_periodically(
     chat_id: int, context: ContextTypes.DEFAULT_TYPE
 ) -> None:
@@ -118,13 +145,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             return
 
         raw_answer = str(result.get("answer", ""))
+        sources = result.get("sources", [])
         parts = format_response(
             answer_text=raw_answer,
-            youtube_sources=result.get("sources", []),
+            youtube_sources=sources,
             question_sources=result.get("question_sources", []),
         )
-        for part in parts:
-            _ = await message.reply_text(part, parse_mode=ParseMode.HTML)
+        await _send_reply_parts(message, parts, sources)
 
         history.save_turn(
             user_id=user_id,
@@ -194,13 +221,13 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             return
 
         raw_answer = str(result.get("answer", ""))
+        sources = result.get("sources", [])
         parts = format_response(
             answer_text=raw_answer,
-            youtube_sources=result.get("sources", []),
+            youtube_sources=sources,
             question_sources=result.get("question_sources", []),
         )
-        for part in parts:
-            _ = await message.reply_text(part, parse_mode=ParseMode.HTML)
+        await _send_reply_parts(message, parts, sources)
 
         history.save_turn(
             user_id=user_id,
