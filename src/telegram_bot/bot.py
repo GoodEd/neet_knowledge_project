@@ -94,7 +94,7 @@ def _build_source_buttons(
             continue
         title = str(src.get("title") or f"Video #{i}")
         ts = src.get("timestamp_label") or ""
-        label = f"\u25b6\ufe0f {title}"
+        label = f"\u25b6\ufe0f Video #{i}: {title}"
         if ts:
             label += f" ({ts})"
         if len(label) > 60:
@@ -107,7 +107,7 @@ def _build_source_buttons(
             continue
         text = str(src.get("content") or src.get("title") or f"Question #{i}")
         text = text.replace("\n", " ").strip()
-        label = f"\ud83d\udcdd {text}"
+        label = f"\ud83d\udcdd Q#{i}: {text}"
         if len(label) > 60:
             label = label[:57] + "..."
         url = f"https://neetprep.com/epubQuestion/{qid}"
