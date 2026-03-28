@@ -60,17 +60,40 @@ def _convert_sup_sub(text: str) -> str:
 
 
 def _convert_markdown_to_html(text: str) -> str:
-    converted = _MD_BOLD_PATTERN.sub(r"<b>\1</b>", text)
+    converted = re.sub(r"\*{3}(.+?)\*{3}", r"<b><i>\1</i></b>", text)
+    converted = _MD_BOLD_PATTERN.sub(r"<b>\1</b>", converted)
     converted = _MD_ITALIC_PATTERN.sub(r"<i>\1</i>", converted)
     converted = re.sub(r"^(\s*)\*\s+", r"\1" + "\u2022 ", converted, flags=re.MULTILINE)
     return converted
+
+
+def _validate_html_tags(text: str) -> str:
+    stack: list[str] = []
+    tag_re = re.compile(r"<(/?)([a-z]+)[^>]*>", re.IGNORECASE)
+    allowed = {"b", "i", "a", "code", "pre"}
+    for match in tag_re.finditer(text):
+        is_closing = match.group(1) == "/"
+        tag = match.group(2).lower()
+        if tag not in allowed:
+            continue
+        if is_closing:
+            if stack and stack[-1] == tag:
+                stack.pop()
+            else:
+                return re.sub(r"</?[bi]>", "", text)
+        else:
+            stack.append(tag)
+    if stack:
+        return re.sub(r"</?[bi]>", "", text)
+    return text
 
 
 def format_answer_text(answer_text: str) -> str:
     converted = _convert_sup_sub(answer_text)
     latex_stripped = _strip_latex_delimiters(converted)
     escaped = html_escape(latex_stripped)
-    return _convert_markdown_to_html(escaped)
+    md_converted = _convert_markdown_to_html(escaped)
+    return _validate_html_tags(md_converted)
 
 
 def _parse_timestamp_to_seconds(timestamp: str) -> int | None:
