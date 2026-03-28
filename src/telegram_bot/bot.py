@@ -92,26 +92,26 @@ def _build_source_buttons(
         url = str(src.get("timestamp_url") or src.get("source") or "")
         if not url:
             continue
-        buttons.append(
-            [
-                InlineKeyboardButton(
-                    text=f"\u25b6\ufe0f Video #{i}", web_app=WebAppInfo(url=url)
-                )
-            ]
-        )
+        title = str(src.get("title") or f"Video #{i}")
+        ts = src.get("timestamp_label") or ""
+        label = f"\u25b6\ufe0f {title}"
+        if ts:
+            label += f" ({ts})"
+        if len(label) > 60:
+            label = label[:57] + "..."
+        buttons.append([InlineKeyboardButton(text=label, web_app=WebAppInfo(url=url))])
 
     for i, src in enumerate(question_sources[:5], start=1):
         qid = str(src.get("question_id") or "")
         if not qid:
             continue
+        text = str(src.get("content") or src.get("title") or f"Question #{i}")
+        text = text.replace("\n", " ").strip()
+        label = f"\ud83d\udcdd {text}"
+        if len(label) > 60:
+            label = label[:57] + "..."
         url = f"https://neetprep.com/epubQuestion/{qid}"
-        buttons.append(
-            [
-                InlineKeyboardButton(
-                    text=f"\ud83d\udcdd Question #{i}", web_app=WebAppInfo(url=url)
-                )
-            ]
-        )
+        buttons.append([InlineKeyboardButton(text=label, web_app=WebAppInfo(url=url))])
 
     return InlineKeyboardMarkup(buttons) if buttons else None
 
