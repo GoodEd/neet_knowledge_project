@@ -38,6 +38,15 @@ content:
   ocr_language: eng+hin  # English + Hindi for NEET
   youtube_language: en
 
+translation:
+  enabled: false
+  provider: transformers
+  model: google/translategemma-12b-it
+  source_lang: hi
+  target_lang: en
+  max_chars_per_request: 1500
+  apply_only_to_s3_transcript: true
+
 # RAG Settings
 rag:
   retrieval_top_k: 5
