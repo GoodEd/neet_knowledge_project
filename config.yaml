@@ -42,6 +42,12 @@ content:
 rag:
   retrieval_top_k: 5
   similarity_threshold: 0.5
+  # Hybrid search settings
+  bm25_weight: 0.4
+  faiss_weight: 0.6
+  reranker_model: cross-encoder/ms-marco-MiniLM-L-6-v2
+  reranker_top_k: 50
+  max_query_expansions: 5
 
 # Paths
 paths:
