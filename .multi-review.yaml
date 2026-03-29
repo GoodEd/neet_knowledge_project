@@ -1,0 +1,21 @@
+# Multi-Model Code Review Configuration
+# Add/remove models by editing this file — no code changes needed.
+#
+# Each model must use an OpenRouter model ID.
+# Browse models: https://openrouter.ai/models
+
+models:
+  - id: anthropic/claude-sonnet-4-5
+    name: Claude Sonnet
+  - id: google/gemini-2.5-pro-preview-05-06
+    name: Gemini Pro
+  - id: openai/gpt-4.1
+    name: GPT-4.1
+
+settings:
+  # Seconds to wait for each model response
+  timeout_seconds: 120
+  # Truncate diffs longer than this (lines)
+  max_diff_lines: 2000
+  # Exit non-zero if any model reports Critical issues (used by pre-push hook)
+  fail_on_critical: true
