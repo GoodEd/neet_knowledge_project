@@ -206,7 +206,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             question_sources=q_sources,
         )
 
-        await status_msg.delete()
+        try:
+            await status_msg.delete()
+        except Exception:
+            pass
         await _send_reply_parts(message, parts, sources, q_sources)
 
         history.save_turn(
@@ -293,7 +296,10 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             question_sources=q_sources,
         )
 
-        await status_msg.delete()
+        try:
+            await status_msg.delete()
+        except Exception:
+            pass
         await _send_reply_parts(message, parts, sources, q_sources)
 
         history.save_turn(

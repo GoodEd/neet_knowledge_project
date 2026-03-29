@@ -387,7 +387,7 @@ resource "aws_lb_target_group" "telegram_webhook" {
     path                = "/telegram-webhook"
     port                = "8443"
     protocol            = "HTTP"
-    matcher             = "200-405"
+    matcher             = "200,405"
     interval            = 30
     timeout             = 10
     healthy_threshold   = 2

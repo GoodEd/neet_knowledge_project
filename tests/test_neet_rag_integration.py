@@ -122,27 +122,6 @@ def test_neetrag_falls_back_to_single_index_without_split_subdirs(tmp_path):
     assert not isinstance(rag.vector_manager, CompositeVectorStoreManager)
 
 
-def test_retrieve_docs_blended_returns_only_csv_docs(tmp_path):
-    _create_split_indexes(tmp_path, csv_count=4, youtube_count=3)
-    rag = _build_rag(tmp_path)
-    rag.vector_manager.load_vectorstore()
-
-    docs = rag._retrieve_docs_blended("cell biology question", top_k=5)
-
-    assert docs
-    assert all(doc.metadata.get("source_type") == "csv" for doc in docs)
-
-
-def test_retrieve_docs_blended_returns_max_three_docs(tmp_path):
-    _create_split_indexes(tmp_path, csv_count=6, youtube_count=1)
-    rag = _build_rag(tmp_path)
-    rag.vector_manager.load_vectorstore()
-
-    docs = rag._retrieve_docs_blended("neet biology", top_k=10)
-
-    assert len(docs) == 3
-
-
 def test_is_youtube_doc_identifies_youtube_documents(tmp_path):
     _create_single_index(tmp_path)
     doc = _build_youtube_doc(1)

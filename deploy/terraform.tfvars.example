@@ -53,8 +53,7 @@ streamlit_max_capacity  = 10
 telegram_webhook_path = "/telegram-webhook"
 
 # Fargate Spot (70% cost savings, tasks may be interrupted)
-use_fargate_spot        = true
-streamlit_desired_count = 2
+use_fargate_spot = true
 
 # Telegram Bot (optional — leave empty to disable)
 telegram_bot_token_secret_arn = ""

@@ -24,15 +24,19 @@ def _reciprocal_rank_fusion(
     ranked_lists: list[list[tuple[Document, float]]],
     k: int = 60,
 ) -> list[Document]:
-    doc_scores: dict[int, float] = {}
-    doc_map: dict[int, Document] = {}
+    doc_scores: dict[str, float] = {}
+    doc_map: dict[str, Document] = {}
     for results in ranked_lists:
+        seen_in_list: set[str] = set()
         for rank, (doc, _) in enumerate(results, start=1):
-            doc_id = id(doc)
-            doc_scores[doc_id] = doc_scores.get(doc_id, 0) + 1.0 / (k + rank)
-            doc_map[doc_id] = doc
-    sorted_ids = sorted(doc_scores, key=lambda doc_id: doc_scores[doc_id], reverse=True)
-    return [doc_map[did] for did in sorted_ids]
+            doc_key = doc.page_content[:200]
+            if doc_key in seen_in_list:
+                continue
+            seen_in_list.add(doc_key)
+            doc_scores[doc_key] = doc_scores.get(doc_key, 0) + 1.0 / (k + rank)
+            doc_map[doc_key] = doc
+    sorted_keys = sorted(doc_scores, key=lambda k_: doc_scores[k_], reverse=True)
+    return [doc_map[k_] for k_ in sorted_keys]
 
 
 class NEETRAG:
@@ -499,31 +503,6 @@ class NEETRAG:
         rerank_top = min(len(merged), rerank_top_k)
         reranked = reranker.rerank(question, merged[:rerank_top], top_k=top_k)
         return self._dedupe_docs(reranked)[:top_k]
-
-    def _retrieve_docs_blended(self, question: str, top_k: int) -> List[Document]:
-        max_csv = min(top_k, 3)
-        csv_fetch = max(max_csv * 4, 20)
-
-        csv_scored = self.vector_manager.similarity_search_with_score(
-            question, k=csv_fetch, filter={"source_type": "csv"}
-        )
-
-        filtered = []
-        for doc, score in csv_scored:
-            if self._score_to_similarity(score) >= self.similarity_threshold:
-                filtered.append((doc, score))
-        if not filtered:
-            try:
-                bm25 = self._ensure_bm25()
-                bm25_results = bm25.search(question, k=max_csv, source_type="csv")
-                if bm25_results:
-                    return [doc for doc, _ in bm25_results[:max_csv]]
-            except Exception:
-                pass
-            return []
-
-        merged = self._merge_rerank_docs(filtered, top_k=max_csv)
-        return self._dedupe_docs(merged)[:max_csv]
 
     @staticmethod
     def _is_youtube_doc(doc: Document) -> bool:
