@@ -589,6 +589,7 @@ resource "aws_ecs_service" "streamlit" {
   cluster                = data.aws_ecs_cluster.shared.id
   task_definition        = aws_ecs_task_definition.streamlit.arn
   desired_count          = var.streamlit_desired_count
+  force_new_deployment   = true
   enable_execute_command = var.enable_ecs_exec
 
   dynamic "capacity_provider_strategy" {
