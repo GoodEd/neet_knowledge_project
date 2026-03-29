@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import asyncio
 import importlib
+import json
 import sys
 from pathlib import Path
+from unittest.mock import AsyncMock, patch
 
+import httpx
 import pytest
 
 
@@ -157,3 +161,105 @@ Gemini body
     assert "<summary>Model: Gemini</summary>" in formatted
     assert "Claude body" in formatted
     assert "Gemini body" in formatted
+
+
+class TestCallModel:
+    def _run(self, coro):
+        return asyncio.run(coro)
+
+    def test_returns_error_when_api_key_missing(self):
+        mod = _load_module()
+
+        async def _test():
+            async with httpx.AsyncClient() as client:
+                return await mod.call_model(client, "test/model", "Test", "prompt", 30)
+
+        with patch.dict("os.environ", {"OPENAI_API_KEY": ""}, clear=False):
+            result = self._run(_test())
+
+        assert result["error"] == "OPENAI_API_KEY not set"
+        assert result["content"] is None
+
+    def test_returns_content_on_success(self):
+        mod = _load_module()
+        response_body = {"choices": [{"message": {"content": "Looks good"}}]}
+        mock_request = httpx.Request("POST", "https://fake.api/v1/chat/completions")
+        mock_response = httpx.Response(200, json=response_body, request=mock_request)
+
+        async def mock_post(*args, **kwargs):
+            return mock_response
+
+        async def _test():
+            client = AsyncMock(spec=httpx.AsyncClient)
+            client.post = mock_post
+            return await mod.call_model(client, "test/model", "Test", "review this", 30)
+
+        with patch.dict(
+            "os.environ",
+            {"OPENAI_API_KEY": "sk-test-key", "OPENAI_BASE_URL": "https://fake.api/v1"},
+            clear=False,
+        ):
+            result = self._run(_test())
+
+        assert result["error"] is None
+        assert result["content"] == "Looks good"
+        assert result["model"] == "Test"
+
+    def test_returns_error_on_timeout(self):
+        mod = _load_module()
+
+        async def mock_post(*args, **kwargs):
+            raise httpx.TimeoutException("timed out")
+
+        async def _test():
+            client = AsyncMock(spec=httpx.AsyncClient)
+            client.post = mock_post
+            return await mod.call_model(client, "test/model", "Test", "review this", 30)
+
+        with patch.dict(
+            "os.environ",
+            {"OPENAI_API_KEY": "sk-test-key", "OPENAI_BASE_URL": "https://fake.api/v1"},
+            clear=False,
+        ):
+            result = self._run(_test())
+
+        assert "timeout" in result["error"].lower()
+        assert result["content"] is None
+
+    def test_returns_error_on_http_error(self):
+        mod = _load_module()
+        mock_response = httpx.Response(429, text="rate limited")
+
+        async def mock_post(*args, **kwargs):
+            raise httpx.HTTPStatusError(
+                "rate limited",
+                request=httpx.Request("POST", "https://fake.api"),
+                response=mock_response,
+            )
+
+        async def _test():
+            client = AsyncMock(spec=httpx.AsyncClient)
+            client.post = mock_post
+            return await mod.call_model(client, "test/model", "Test", "review this", 30)
+
+        with patch.dict(
+            "os.environ",
+            {"OPENAI_API_KEY": "sk-test-key", "OPENAI_BASE_URL": "https://fake.api/v1"},
+            clear=False,
+        ):
+            result = self._run(_test())
+
+        client = AsyncMock(spec=httpx.AsyncClient)
+        client.post = mock_post
+
+        with patch.dict(
+            "os.environ",
+            {"OPENAI_API_KEY": "sk-test-key", "OPENAI_BASE_URL": "https://fake.api/v1"},
+            clear=False,
+        ):
+            result = self._run(
+                mod.call_model(client, "test/model", "Test", "review this", 30)
+            )
+
+        assert "429" in result["error"]
+        assert result["content"] is None

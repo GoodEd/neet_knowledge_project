@@ -22,7 +22,7 @@ while read -r local_ref local_oid remote_ref remote_oid; do
     fi
 
     if [ "$remote_oid" = "0000000000000000000000000000000000000000" ]; then
-        base="origin/main"
+        base=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's@^refs/remotes/@@') || base="origin/main"
     else
         base="$remote_oid"
     fi

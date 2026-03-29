@@ -21,6 +21,19 @@ from typing import Any, cast
 
 import httpx
 
+try:
+    import yaml
+except ImportError:
+    print("PyYAML is required: pip install pyyaml", file=sys.stderr)
+    sys.exit(1)
+
+try:
+    from dotenv import load_dotenv
+
+    load_dotenv()
+except ImportError:
+    pass
+
 
 @dataclass
 class ReviewConfig:
@@ -90,8 +103,7 @@ def load_config(path: str) -> ReviewConfig:
     if not config_path.exists():
         raise FileNotFoundError(f"Config file not found: {path}")
 
-    yaml_module = __import__("yaml")
-    raw = cast(dict[str, Any], yaml_module.safe_load(config_path.read_text()) or {})
+    raw = cast(dict[str, Any], yaml.safe_load(config_path.read_text()) or {})
     models = cast(list[dict[str, str]], raw.get("models") or [])
     if not models:
         raise ValueError("Config must define at least one model")
@@ -156,6 +168,9 @@ async def call_model(
     timeout: int,
 ) -> dict[str, str | None]:
     api_key = os.getenv("OPENAI_API_KEY", "")
+    if not api_key:
+        return {"model": model_name, "content": None, "error": "OPENAI_API_KEY not set"}
+
     base_url = os.getenv("OPENAI_BASE_URL", "https://openrouter.ai/api/v1").rstrip("/")
 
     headers = {
