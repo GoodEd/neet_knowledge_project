@@ -1,4 +1,3 @@
-import asyncio
 import logging
 import urllib.parse
 from typing import Any, Mapping
@@ -176,7 +175,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
     question = message.text
     user_id = user.id
-    chat_id = chat.id
     rag = context.bot_data["rag"]
     history = context.bot_data["history"]
 
@@ -232,7 +230,6 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         return
 
     user_id = user.id
-    chat_id = chat.id
     caption = message.caption or ""
     rag = context.bot_data["rag"]
     history = context.bot_data["history"]
@@ -310,8 +307,6 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             await status_msg.edit_text(_ERR_GENERIC)
         except Exception:
             await message.reply_text(_ERR_GENERIC)
-    finally:
-        typing_task.cancel()
 
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:

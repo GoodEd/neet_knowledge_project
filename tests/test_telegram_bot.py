@@ -78,10 +78,6 @@ def _make_context(rag=None, history=None):
         "history": history or _make_mock_history(),
     }
 
-    import src.telegram_bot.bot as telegram_bot
-
-    setattr(telegram_bot, "typing_task", MagicMock())
-
     mock_file = MagicMock()
     mock_file.download_as_bytearray = AsyncMock(return_value=bytearray(b"fake_image"))
     context.bot.get_file = AsyncMock(return_value=mock_file)
