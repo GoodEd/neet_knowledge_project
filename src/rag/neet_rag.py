@@ -577,20 +577,40 @@ class NEETRAG:
     def _retrieve_youtube_sources(
         self, question: str, top_k: int = 5
     ) -> List[Dict[str, Any]]:
+        """Hybrid YouTube source retrieval: FAISS + BM25 + RRF."""
+        queries = expand_query(question)
         fetch_k = max(top_k * 6, 30)
-        try:
-            scored = self.vector_manager.similarity_search_with_score(
-                question, k=fetch_k, filter={"source_type": "youtube"}
-            )
-        except Exception:
-            return []
 
+        # FAISS vector search
+        faiss_results: List[Tuple[Document, float]] = []
+        for q in queries:
+            try:
+                scored = self.vector_manager.similarity_search_with_score(
+                    q, k=fetch_k, filter={"source_type": "youtube"}
+                )
+                for doc, score in scored:
+                    sim = self._score_to_similarity(score)
+                    if sim >= self.similarity_threshold:
+                        faiss_results.append((doc, sim))
+            except Exception:
+                continue
+
+        # BM25 keyword search
+        bm25_results: List[Tuple[Document, float]] = []
+        try:
+            bm25 = self._ensure_bm25()
+            for q in queries:
+                bm25_results.extend(bm25.search(q, k=fetch_k, source_type="youtube"))
+        except Exception:
+            pass
+
+        # RRF merge
+        merged = _reciprocal_rank_fusion([faiss_results, bm25_results], k=60)
+
+        # Dedupe by video_id
         seen_videos: set = set()
         results: List[Dict[str, Any]] = []
-        for doc, score in scored:
-            sim = self._score_to_similarity(score)
-            if sim < self.similarity_threshold:
-                continue
+        for doc in merged:
             video_id = doc.metadata.get("video_id") or self._extract_video_id(
                 doc.metadata.get("source", "")
             )
@@ -601,42 +621,40 @@ class NEETRAG:
             if len(results) >= top_k:
                 break
 
-        if not results:
-            try:
-                bm25 = self._ensure_bm25()
-                bm25_results = bm25.search(question, k=fetch_k, source_type="youtube")
-                for doc, _ in bm25_results:
-                    video_id = doc.metadata.get("video_id") or self._extract_video_id(
-                        doc.metadata.get("source", "")
-                    )
-                    if not video_id or video_id in seen_videos:
-                        continue
-                    seen_videos.add(video_id)
-                    results.append(self._build_source_info(doc))
-                    if len(results) >= top_k:
-                        break
-            except Exception:
-                pass
-
         return results
 
     def _retrieve_question_sources(
         self, question: str, top_k: int = 5
     ) -> List[Dict[str, Any]]:
+        queries = expand_query(question)
         fetch_k = max(top_k * 4, 20)
+
+        faiss_results: List[Tuple[Document, float]] = []
+        for q in queries:
+            try:
+                scored = self.vector_manager.similarity_search_with_score(
+                    q, k=fetch_k, filter={"source_type": "csv"}
+                )
+                for doc, score in scored:
+                    sim = self._score_to_similarity(score)
+                    if sim >= self.similarity_threshold:
+                        faiss_results.append((doc, sim))
+            except Exception:
+                continue
+
+        bm25_results: List[Tuple[Document, float]] = []
         try:
-            scored = self.vector_manager.similarity_search_with_score(
-                question, k=fetch_k, filter={"source_type": "csv"}
-            )
+            bm25 = self._ensure_bm25()
+            for q in queries:
+                bm25_results.extend(bm25.search(q, k=fetch_k, source_type="csv"))
         except Exception:
-            return []
+            pass
+
+        merged = _reciprocal_rank_fusion([faiss_results, bm25_results], k=60)
 
         seen_question_ids: set = set()
         results: List[Dict[str, Any]] = []
-        for doc, score in scored:
-            sim = self._score_to_similarity(score)
-            if sim < self.similarity_threshold:
-                continue
+        for doc in merged:
             question_id = str(doc.metadata.get("question_id", "")).strip()
             if not question_id or question_id in seen_question_ids:
                 continue
@@ -646,23 +664,6 @@ class NEETRAG:
             results.append(info)
             if len(results) >= top_k:
                 break
-
-        if not results:
-            try:
-                bm25 = self._ensure_bm25()
-                bm25_results = bm25.search(question, k=fetch_k, source_type="csv")
-                for doc, _ in bm25_results:
-                    question_id = str(doc.metadata.get("question_id", "")).strip()
-                    if not question_id or question_id in seen_question_ids:
-                        continue
-                    seen_question_ids.add(question_id)
-                    info = self._build_source_info(doc)
-                    info["full_content"] = doc.page_content
-                    results.append(info)
-                    if len(results) >= top_k:
-                        break
-            except Exception:
-                pass
 
         return results
 
