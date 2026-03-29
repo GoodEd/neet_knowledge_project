@@ -162,6 +162,25 @@ class VectorStoreManager:
             include_trackless_when_track_set=False,
         )
 
+    def has_documents_for_source_id(self, source_id: str) -> bool:
+        if not os.path.exists(self.persist_directory):
+            return False
+
+        if self.vectorstore is None:
+            try:
+                self.load_vectorstore()
+            except FileNotFoundError:
+                return False
+
+        if self.vectorstore is None:
+            return False
+
+        doc_map = getattr(self.vectorstore.docstore, "_dict", {})
+        for doc in doc_map.values():
+            if isinstance(doc, Document) and doc.metadata.get("source_id") == source_id:
+                return True
+        return False
+
     def delete_by_source_id_and_question_id(
         self, source_id: str, question_id: str
     ) -> int:
