@@ -71,8 +71,21 @@ variable "ecr_worker_image" {
 }
 
 variable "streamlit_desired_count" {
-  type    = number
-  default = 2
+  description = "Number of desired ECS tasks for the streamlit service."
+  type        = number
+  default     = 1
+}
+
+variable "telegram_webhook_path" {
+  description = "ALB path pattern for Telegram webhook."
+  type        = string
+  default     = "/telegram-webhook"
+}
+
+variable "use_fargate_spot" {
+  description = "Use FARGATE_SPOT capacity provider for cost savings."
+  type        = bool
+  default     = false
 }
 
 variable "streamlit_min_capacity" {
