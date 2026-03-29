@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import urllib.parse
 from typing import Any, Mapping
 
 from telegram import (
@@ -52,8 +53,22 @@ def create_application(token: str, rag: Any | None = None):
     return app
 
 
-def run_polling(app) -> None:
-    app.run_polling(drop_pending_updates=True)
+def run_webhook(
+    app: Application[Any, Any, Any, Any, Any, Any],
+    webhook_url: str,
+    port: int = 8443,
+) -> None:
+    logger.info("Starting Telegram bot webhook on port %d", port)
+    logger.info("Webhook URL: %s", webhook_url)
+    parsed = urllib.parse.urlparse(webhook_url)
+    webhook_path = parsed.path or "/telegram-webhook"
+    app.run_webhook(
+        listen="0.0.0.0",
+        port=port,
+        url_path=webhook_path,
+        webhook_url=webhook_url,
+        drop_pending_updates=True,
+    )
 
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -83,8 +98,8 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
 
 def _build_source_buttons(
-    youtube_sources: list[dict],
-    question_sources: list[dict],
+    youtube_sources: list[dict[str, object]],
+    question_sources: list[dict[str, object]],
 ) -> InlineKeyboardMarkup | None:
     buttons: list[list[InlineKeyboardButton]] = []
 
@@ -116,9 +131,9 @@ def _build_source_buttons(
     return InlineKeyboardMarkup(buttons) if buttons else None
 
 
-def _extract_first_youtube_url(sources: list[dict]) -> str:
+def _extract_first_youtube_url(sources: list[dict[str, object]]) -> str:
     for src in sources:
-        url = src.get("timestamp_url") or src.get("source") or ""
+        url = str(src.get("timestamp_url") or src.get("source") or "")
         if url and ("youtube.com" in url or "youtu.be" in url):
             return url
     return ""
@@ -127,8 +142,8 @@ def _extract_first_youtube_url(sources: list[dict]) -> str:
 async def _send_reply_parts(
     message: Any,
     parts: list[str],
-    sources: list[dict],
-    question_sources: list[dict] | None = None,
+    sources: list[dict[str, object]],
+    question_sources: list[dict[str, object]] | None = None,
 ) -> None:
     preview_url = _extract_first_youtube_url(sources)
     keyboard = _build_source_buttons(sources, question_sources or [])

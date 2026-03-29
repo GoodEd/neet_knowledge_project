@@ -11,17 +11,19 @@ from src.utils.rag_singleton import get_rag_system  # noqa: E402
 rag = get_rag_system()
 print(f"[startup] RAG singleton ready in {time.monotonic() - t0:.1f}s")
 
-# Start Telegram bot in-process after RAG is warm (avoids OOM from parallel loading)
 telegram_token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 if telegram_token:
-    import subprocess
+    webhook_url = os.environ.get("TELEGRAM_WEBHOOK_URL", "")
+    if webhook_url:
+        import subprocess
 
-    print("[startup] Starting Telegram bot (polling mode)...")
-    bot_proc = subprocess.Popen(
-        [sys.executable, "run_telegram_bot.py"],
-        env={**os.environ, "RAG_PREWARMED": "1"},
-    )
-    print(f"[startup] Telegram bot started (PID: {bot_proc.pid})")
+        print(f"[startup] Starting Telegram bot (webhook mode: {webhook_url})...")
+        bot_proc = subprocess.Popen(
+            [sys.executable, "run_telegram_bot.py"],
+        )
+        print(f"[startup] Telegram bot started (PID: {bot_proc.pid})")
+    else:
+        print("[startup] TELEGRAM_WEBHOOK_URL not set - skipping bot startup")
 
 sys.argv = [
     "streamlit",
@@ -35,6 +37,6 @@ sys.argv = [
     "false",
 ]
 
-from streamlit.web.cli import main  # noqa: E402
+from importlib import import_module  # noqa: E402
 
-main()
+import_module("streamlit.web.cli").main()
