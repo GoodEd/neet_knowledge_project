@@ -414,8 +414,13 @@ resource "aws_lb_listener" "neet_https" {
   tags = local.common_tags
 }
 
+data "aws_lb_listener" "shared_8443" {
+  load_balancer_arn = data.aws_lb.shared.arn
+  port              = 8443
+}
+
 resource "aws_lb_listener_rule" "telegram_webhook" {
-  listener_arn = aws_lb_listener.neet_https.arn
+  listener_arn = data.aws_lb_listener.shared_8443.arn
   priority     = 10
 
   action {
@@ -488,7 +493,7 @@ resource "aws_ecs_task_definition" "streamlit" {
         { name = "SHOW_MORE_ENABLED", value = var.show_more_enabled },
         { name = "SHOW_QUESTION_SOURCES", value = var.show_question_sources },
         { name = "ASK_ASSISTANT_ENABLED", value = var.ask_assistant_enabled },
-        { name = "TELEGRAM_WEBHOOK_URL", value = "https://${var.app_fqdn}${var.telegram_webhook_path}" }
+        { name = "TELEGRAM_WEBHOOK_URL", value = "https://${var.app_fqdn}:8443${var.telegram_webhook_path}" }
       ], local.streamlit_openai_plain_env)
 
       secrets = local.streamlit_container_secrets
