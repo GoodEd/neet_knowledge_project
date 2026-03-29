@@ -272,6 +272,14 @@ class VectorStoreManager:
             "persist_directory": self.persist_directory,
         }
 
+    def get_all_documents(self) -> List[Document]:
+        if self.vectorstore is None:
+            return []
+        docstore = self.vectorstore.docstore
+        if hasattr(docstore, "_dict"):
+            return list(docstore._dict.values())
+        return []
+
 
 _SOURCE_TYPE_YOUTUBE = "youtube"
 _SOURCE_TYPE_CSV = "csv"
@@ -455,6 +463,12 @@ class CompositeVectorStoreManager:
             "sub_indexes": sub_info,
             "embedding_model": self.embedding_model,
         }
+
+    def get_all_documents(self) -> List[Document]:
+        all_docs: List[Document] = []
+        for mgr in self._managers.values():
+            all_docs.extend(mgr.get_all_documents())
+        return all_docs
 
 
 def build_composite_manager(
