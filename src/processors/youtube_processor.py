@@ -3,14 +3,39 @@ import re
 import json
 import logging
 from datetime import datetime
-from typing import List, Dict, Optional, Any
+from typing import List, Dict, Literal, Optional, Any, Protocol, cast, runtime_checkable
+from typing_extensions import TypedDict
 import yt_dlp
 from youtube_transcript_api import YouTubeTranscriptApi
 from langchain_core.documents import Document
 
-# Set up logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+TranslationStatus = Literal["success", "skipped_ineligible", "skipped_empty", "failed"]
+
+
+class TranscriptEntry(TypedDict):
+    text: str
+    start: float
+    duration: float
+    video_title: str
+    track_id: str
+
+
+class TranslatedDocumentResult(TypedDict):
+    status: TranslationStatus
+    documents: List[Document]
+    error: Optional[str]
+
+
+@runtime_checkable
+class TranslatorProtocol(Protocol):
+    model_name: str
+    source_lang_code: str
+    target_lang_code: str
+
+    def translate_text(self, text: str) -> str: ...
 
 
 class YouTubeProcessor:
@@ -25,7 +50,7 @@ class YouTubeProcessor:
         self.youtube_client = None
         if self.api_key:
             try:
-                from googleapiclient.discovery import build
+                from googleapiclient.discovery import build  # pyright: ignore[reportMissingImports]
 
                 self.youtube_client = build("youtube", "v3", developerKey=self.api_key)
                 logger.info("YouTube Data API client initialized.")
@@ -60,7 +85,9 @@ class YouTubeProcessor:
         if self.youtube_client:
             metadata = self._get_metadata_from_api(video_id)
             if metadata:
-                video_title = metadata.get("title", video_title)
+                api_title = metadata.get("title")
+                if isinstance(api_title, str) and api_title:
+                    video_title = api_title
 
         if video_title == "Unknown Video" and s3_transcript_json_uri:
             inferred = self._infer_title_from_transcript_uri(
@@ -606,7 +633,7 @@ class YouTubeProcessor:
 
         with tempfile.TemporaryDirectory() as tmpdir:
             audio_path = os.path.join(tmpdir, "audio")
-            ydl_opts = {
+            ydl_opts: Any = {
                 "format": "bestaudio/best",
                 "postprocessors": [
                     {
@@ -1018,6 +1045,110 @@ class YouTubeProcessor:
                 return match.group(1)
         return None
 
+    _ELIGIBLE_TRANSCRIPT_SOURCES = frozenset({"s3_transcript_json"})
+
+    def prepare_translated_documents(
+        self,
+        *,
+        transcript_entries: List[TranscriptEntry],
+        translator: TranslatorProtocol,
+        url: str,
+        video_id: str,
+        transcript_source: str,
+    ) -> TranslatedDocumentResult:
+        if transcript_source not in self._ELIGIBLE_TRANSCRIPT_SOURCES:
+            logger.info(
+                "Skipping translation: transcript_source=%r is not S3 transcript JSON",
+                transcript_source,
+            )
+            return {"status": "skipped_ineligible", "documents": [], "error": None}
+
+        if not transcript_entries:
+            return {"status": "skipped_empty", "documents": [], "error": None}
+
+        translated_entries: List[Dict[str, Any]] = []
+        try:
+            for entry in transcript_entries:
+                original_text = entry["text"]
+                translated_text = translator.translate_text(original_text)
+                translated_entries.append(
+                    {**entry, "text": translated_text, "_original_text": original_text}
+                )
+        except Exception as exc:
+            logger.warning("Translation failed (all-or-nothing): %s", exc)
+            return {
+                "status": "failed",
+                "documents": [],
+                "error": str(exc),
+            }
+
+        from src.utils.config import Config
+
+        config = Config()
+        chunk_size = cast(int, config.get("processing.chunk_size", 1000))
+        chunk_overlap = cast(int, config.get("processing.chunk_overlap", 200))
+
+        video_title = translated_entries[0].get("video_title", "Unknown Video")
+        translation_meta = {
+            "translation_applied": True,
+            "translation_status": "success",
+            "translation_model": translator.model_name,
+            "translation_source": "s3_transcript_json",
+            "translated_from_lang": translator.source_lang_code,
+            "translated_to_lang": translator.target_lang_code,
+        }
+
+        documents: List[Document] = []
+        i = 0
+        while i < len(translated_entries):
+            chunk_text_parts: List[str] = []
+            chunk_original_parts: List[str] = []
+            chunk_start_time = translated_entries[i]["start"]
+            chunk_length = 0
+
+            j = i
+            while j < len(translated_entries):
+                text = translated_entries[j]["text"]
+                text_len = len(text)
+
+                if chunk_length + text_len > chunk_size and chunk_text_parts:
+                    break
+
+                chunk_text_parts.append(text)
+                chunk_original_parts.append(translated_entries[j]["_original_text"])
+                chunk_length += text_len
+                j += 1
+
+            chunk_text = " ".join(chunk_text_parts)
+            original_text = " ".join(chunk_original_parts)
+
+            meta = {
+                "source": url,
+                "video_id": video_id,
+                "title": video_title,
+                "start_time": chunk_start_time,
+                "source_type": "youtube",
+                "track_id": translated_entries[i].get("track_id", ""),
+                "original_text": original_text,
+                **translation_meta,
+            }
+            documents.append(Document(page_content=chunk_text, metadata=meta))
+
+            if j == len(translated_entries):
+                break
+
+            chars_to_advance = max(1, chunk_length - chunk_overlap)
+            advanced_chars = 0
+            next_i = i
+            while next_i < j and advanced_chars < chars_to_advance:
+                advanced_chars += len(translated_entries[next_i]["text"])
+                next_i += 1
+            if next_i == i:
+                next_i += 1
+            i = next_i
+
+        return {"status": "success", "documents": documents, "error": None}
+
     def _create_documents(
         self, transcript_data: List[Dict[str, Any]], url: str, video_id: str
     ) -> List[Document]:
@@ -1028,8 +1159,8 @@ class YouTubeProcessor:
         from src.utils.config import Config
 
         config = Config()
-        chunk_size = config.get("processing.chunk_size", 1000)
-        chunk_overlap = config.get("processing.chunk_overlap", 200)
+        chunk_size = cast(int, config.get("processing.chunk_size", 1000))
+        chunk_overlap = cast(int, config.get("processing.chunk_overlap", 200))
 
         video_title = transcript_data[0].get("video_title", "Unknown Video")
 
