@@ -495,7 +495,8 @@ class NEETRAG:
             return []
 
         reranker = self._ensure_reranker()
-        rerank_top = min(len(merged), 50)
+        rerank_top_k = getattr(self.config, "reranker_top_k", 20)
+        rerank_top = min(len(merged), rerank_top_k)
         reranked = reranker.rerank(question, merged[:rerank_top], top_k=top_k)
         return self._dedupe_docs(reranked)[:top_k]
 
