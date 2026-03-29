@@ -488,7 +488,7 @@ resource "aws_ecs_task_definition" "streamlit" {
         { name = "SHOW_MORE_ENABLED", value = var.show_more_enabled },
         { name = "SHOW_QUESTION_SOURCES", value = var.show_question_sources },
         { name = "ASK_ASSISTANT_ENABLED", value = var.ask_assistant_enabled },
-        { name = "TELEGRAM_WEBHOOK_URL", value = "https://${var.app_fqdn}:7443${var.telegram_webhook_path}" }
+        { name = "TELEGRAM_WEBHOOK_URL", value = "https://${var.app_fqdn}${var.telegram_webhook_path}" }
       ], local.streamlit_openai_plain_env)
 
       secrets = local.streamlit_container_secrets
