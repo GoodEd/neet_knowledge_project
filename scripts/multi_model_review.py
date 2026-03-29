@@ -162,22 +162,31 @@ def build_prompt(diff: str) -> str:
 
 async def call_model(
     client: httpx.AsyncClient,
-    model_id: str,
-    model_name: str,
+    model_cfg: dict[str, str],
     prompt: str,
     timeout: int,
 ) -> dict[str, str | None]:
-    api_key = os.getenv("OPENAI_API_KEY", "")
+    model_id = model_cfg["id"]
+    model_name = model_cfg.get("name", model_id)
+
+    api_key = model_cfg.get("api_key") or os.getenv("OPENAI_API_KEY", "")
     if not api_key:
         return {"model": model_name, "content": None, "error": "OPENAI_API_KEY not set"}
 
-    base_url = os.getenv("OPENAI_BASE_URL", "https://openrouter.ai/api/v1").rstrip("/")
+    base_url = (
+        model_cfg.get("base_url")
+        or os.getenv("OPENAI_BASE_URL", "https://openrouter.ai/api/v1")
+    ).rstrip("/")
 
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "HTTP-Referer": os.getenv("OPENROUTER_HTTP_REFERER", "https://github.com"),
-        "X-Title": os.getenv("OPENROUTER_APP_TITLE", "multi-model-code-review"),
-    }
+    headers: dict[str, str] = {"Authorization": f"Bearer {api_key}"}
+    if "openrouter" in base_url:
+        headers["HTTP-Referer"] = os.getenv(
+            "OPENROUTER_HTTP_REFERER", "https://github.com"
+        )
+        headers["X-Title"] = os.getenv(
+            "OPENROUTER_APP_TITLE", "multi-model-code-review"
+        )
+
     payload = {
         "model": model_id,
         "messages": [
@@ -220,8 +229,7 @@ async def call_all_models(
         tasks = [
             call_model(
                 client=client,
-                model_id=model["id"],
-                model_name=model["name"],
+                model_cfg=model,
                 prompt=prompt,
                 timeout=config.timeout_seconds,
             )
@@ -313,8 +321,13 @@ def find_config() -> str:
         candidate = directory / ".multi-review.yaml"
         if candidate.exists():
             return str(candidate)
+
+    global_config = Path.home() / ".config" / "multi-review.yaml"
+    if global_config.exists():
+        return str(global_config)
+
     raise FileNotFoundError(
-        "Could not find .multi-review.yaml in current directory tree"
+        "No .multi-review.yaml found (searched project tree and ~/.config/)"
     )
 
 

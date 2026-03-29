@@ -1,10 +1,14 @@
 # Multi-Model Code Review Configuration
 # Add/remove models by editing this file — no code changes needed.
 #
-# Each model must use an OpenRouter model ID.
-# Browse models: https://openrouter.ai/models
+# OpenRouter models use global OPENAI_API_KEY + OPENAI_BASE_URL.
+# Other providers: set base_url and api_key per model.
+#
+# Browse OpenRouter models: https://openrouter.ai/models
+# Browse Ollama models:     https://ollama.com/library
 
 models:
+  # --- OpenRouter (cloud) ---
   - id: anthropic/claude-sonnet-4-5
     name: Claude Sonnet
   - id: google/gemini-2.5-pro-preview-05-06
@@ -12,10 +16,18 @@ models:
   - id: openai/gpt-4.1
     name: GPT-4.1
 
+  # --- Ollama (local or remote) ---
+  # Set base_url to your Ollama instance. api_key can be any string.
+  - id: qwen3:32b
+    name: Qwen3 32B
+    base_url: http://localhost:11434/v1
+    api_key: ollama
+  - id: devstral
+    name: Devstral
+    base_url: http://localhost:11434/v1
+    api_key: ollama
+
 settings:
-  # Seconds to wait for each model response
   timeout_seconds: 120
-  # Truncate diffs longer than this (lines)
   max_diff_lines: 2000
-  # Exit non-zero if any model reports Critical issues (used by pre-push hook)
   fail_on_critical: true

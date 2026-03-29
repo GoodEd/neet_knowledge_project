@@ -169,16 +169,43 @@ class TestCallModel:
 
     def test_returns_error_when_api_key_missing(self):
         mod = _load_module()
+        cfg = {"id": "test/model", "name": "Test"}
 
         async def _test():
             async with httpx.AsyncClient() as client:
-                return await mod.call_model(client, "test/model", "Test", "prompt", 30)
+                return await mod.call_model(client, cfg, "prompt", 30)
 
         with patch.dict("os.environ", {"OPENAI_API_KEY": ""}, clear=False):
             result = self._run(_test())
 
         assert result["error"] == "OPENAI_API_KEY not set"
         assert result["content"] is None
+
+    def test_uses_per_model_api_key(self):
+        mod = _load_module()
+        cfg = {"id": "test/model", "name": "Test", "api_key": "per-model-key"}
+        response_body = {"choices": [{"message": {"content": "OK"}}]}
+        mock_request = httpx.Request(
+            "POST", "https://openrouter.ai/api/v1/chat/completions"
+        )
+        mock_response = httpx.Response(200, json=response_body, request=mock_request)
+
+        captured_headers: dict = {}
+
+        async def mock_post(*args, **kwargs):
+            captured_headers.update(kwargs.get("headers", {}))
+            return mock_response
+
+        async def _test():
+            client = AsyncMock(spec=httpx.AsyncClient)
+            client.post = mock_post
+            return await mod.call_model(client, cfg, "review", 30)
+
+        with patch.dict("os.environ", {"OPENAI_API_KEY": ""}, clear=False):
+            result = self._run(_test())
+
+        assert result["error"] is None
+        assert captured_headers["Authorization"] == "Bearer per-model-key"
 
     def test_returns_content_on_success(self):
         mod = _load_module()
@@ -192,7 +219,9 @@ class TestCallModel:
         async def _test():
             client = AsyncMock(spec=httpx.AsyncClient)
             client.post = mock_post
-            return await mod.call_model(client, "test/model", "Test", "review this", 30)
+            return await mod.call_model(
+                client, {"id": "test/model", "name": "Test"}, "review this", 30
+            )
 
         with patch.dict(
             "os.environ",
@@ -214,7 +243,9 @@ class TestCallModel:
         async def _test():
             client = AsyncMock(spec=httpx.AsyncClient)
             client.post = mock_post
-            return await mod.call_model(client, "test/model", "Test", "review this", 30)
+            return await mod.call_model(
+                client, {"id": "test/model", "name": "Test"}, "review this", 30
+            )
 
         with patch.dict(
             "os.environ",
@@ -240,7 +271,9 @@ class TestCallModel:
         async def _test():
             client = AsyncMock(spec=httpx.AsyncClient)
             client.post = mock_post
-            return await mod.call_model(client, "test/model", "Test", "review this", 30)
+            return await mod.call_model(
+                client, {"id": "test/model", "name": "Test"}, "review this", 30
+            )
 
         with patch.dict(
             "os.environ",
@@ -248,18 +281,6 @@ class TestCallModel:
             clear=False,
         ):
             result = self._run(_test())
-
-        client = AsyncMock(spec=httpx.AsyncClient)
-        client.post = mock_post
-
-        with patch.dict(
-            "os.environ",
-            {"OPENAI_API_KEY": "sk-test-key", "OPENAI_BASE_URL": "https://fake.api/v1"},
-            clear=False,
-        ):
-            result = self._run(
-                mod.call_model(client, "test/model", "Test", "review this", 30)
-            )
 
         assert "429" in result["error"]
         assert result["content"] is None
