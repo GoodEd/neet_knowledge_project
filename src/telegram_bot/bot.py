@@ -10,7 +10,7 @@ from telegram import (
     Update,
     WebAppInfo,
 )
-from telegram.constants import ChatAction, ParseMode
+from telegram.constants import ParseMode
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -167,19 +167,6 @@ async def _send_reply_parts(
         )
 
 
-async def _send_typing_periodically(
-    chat_id: int, context: ContextTypes.DEFAULT_TYPE
-) -> None:
-    try:
-        while True:
-            await context.bot.send_chat_action(
-                chat_id=chat_id, action=ChatAction.TYPING
-            )
-            await asyncio.sleep(5)
-    except asyncio.CancelledError:
-        return
-
-
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     message = update.message
     user = update.effective_user
@@ -193,8 +180,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     rag = context.bot_data["rag"]
     history = context.bot_data["history"]
 
-    await context.bot.send_chat_action(chat_id=chat_id, action=ChatAction.TYPING)
-    typing_task = asyncio.create_task(_send_typing_periodically(chat_id, context))
+    status_msg = await message.reply_text(
+        "\u23f3 Searching knowledge base...",
+        parse_mode=ParseMode.HTML,
+    )
     try:
         chat_history = history.load_history(user_id)
         result = rag.query_with_history(
@@ -205,8 +194,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         )
 
         if _is_error_response(result):
-            _ = await message.reply_text(_ERR_GENERIC)
+            await status_msg.edit_text(_ERR_GENERIC)
             return
+
+        await status_msg.edit_text("\u2705 Preparing answer...")
 
         raw_answer = str(result.get("answer", ""))
         sources = result.get("sources", [])
@@ -216,6 +207,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             youtube_sources=sources,
             question_sources=q_sources,
         )
+
+        await status_msg.delete()
         await _send_reply_parts(message, parts, sources, q_sources)
 
         history.save_turn(
@@ -225,9 +218,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         )
     except Exception:
         logger.exception("Failed to handle text message")
-        _ = await message.reply_text(_ERR_GENERIC)
-    finally:
-        typing_task.cancel()
+        try:
+            await status_msg.edit_text(_ERR_GENERIC)
+        except Exception:
+            await message.reply_text(_ERR_GENERIC)
 
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -243,8 +237,10 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     rag = context.bot_data["rag"]
     history = context.bot_data["history"]
 
-    await context.bot.send_chat_action(chat_id=chat_id, action=ChatAction.TYPING)
-    typing_task = asyncio.create_task(_send_typing_periodically(chat_id, context))
+    status_msg = await message.reply_text(
+        "\u23f3 Reading your image...",
+        parse_mode=ParseMode.HTML,
+    )
     try:
         try:
             photo = message.photo[-1]
@@ -252,8 +248,10 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             image_bytes = bytes(await file.download_as_bytearray())
         except Exception:
             logger.exception("Failed downloading photo")
-            _ = await message.reply_text(_ERR_IMAGE_DOWNLOAD)
+            await status_msg.edit_text(_ERR_IMAGE_DOWNLOAD)
             return
+
+        await status_msg.edit_text("\u23f3 Extracting question from image...")
 
         try:
             extracted = rag.llm_manager.extract_image_context(
@@ -265,13 +263,15 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             )
         except Exception:
             logger.exception("Failed extracting photo context")
-            _ = await message.reply_text(_ERR_IMAGE_EXTRACT)
+            await status_msg.edit_text(_ERR_IMAGE_EXTRACT)
             return
 
         if caption:
             question = f"{caption}\n\nImage context:\n{extracted}"
         else:
             question = str(extracted)
+
+        await status_msg.edit_text("\u23f3 Searching knowledge base...")
 
         chat_history = history.load_history(user_id)
         result = rag.query_with_history(
@@ -282,8 +282,10 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         )
 
         if _is_error_response(result):
-            _ = await message.reply_text(_ERR_GENERIC)
+            await status_msg.edit_text(_ERR_GENERIC)
             return
+
+        await status_msg.edit_text("\u2705 Preparing answer...")
 
         raw_answer = str(result.get("answer", ""))
         sources = result.get("sources", [])
@@ -293,6 +295,8 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             youtube_sources=sources,
             question_sources=q_sources,
         )
+
+        await status_msg.delete()
         await _send_reply_parts(message, parts, sources, q_sources)
 
         history.save_turn(
@@ -302,7 +306,10 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         )
     except Exception:
         logger.exception("Failed to handle photo message")
-        _ = await message.reply_text(_ERR_GENERIC)
+        try:
+            await status_msg.edit_text(_ERR_GENERIC)
+        except Exception:
+            await message.reply_text(_ERR_GENERIC)
     finally:
         typing_task.cancel()
 

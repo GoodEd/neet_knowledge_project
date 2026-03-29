@@ -34,6 +34,13 @@ def _make_mock_history():
     return history
 
 
+def _make_status_msg():
+    status = MagicMock()
+    status.edit_text = AsyncMock()
+    status.delete = AsyncMock()
+    return status
+
+
 def _make_text_update(text, user_id=123):
     update = MagicMock()
     update.effective_user.id = user_id
@@ -41,7 +48,8 @@ def _make_text_update(text, user_id=123):
     update.message.text = text
     update.message.caption = None
     update.message.photo = None
-    update.message.reply_text = AsyncMock()
+    status = _make_status_msg()
+    update.message.reply_text = AsyncMock(return_value=status)
     return update
 
 
@@ -58,7 +66,8 @@ def _make_photo_update(caption=None, user_id=123):
     photo_large.file_id = "large_file_id"
     update.message.photo = [photo_small, photo_large]
 
-    update.message.reply_text = AsyncMock()
+    status = _make_status_msg()
+    update.message.reply_text = AsyncMock(return_value=status)
     return update
 
 
@@ -68,7 +77,10 @@ def _make_context(rag=None, history=None):
         "rag": rag or _make_mock_rag(),
         "history": history or _make_mock_history(),
     }
-    context.bot.send_chat_action = AsyncMock()
+
+    import src.telegram_bot.bot as telegram_bot
+
+    setattr(telegram_bot, "typing_task", MagicMock())
 
     mock_file = MagicMock()
     mock_file.download_as_bytearray = AsyncMock(return_value=bytearray(b"fake_image"))
@@ -113,7 +125,10 @@ async def test_handle_message_sends_typing_action():
 
     await handle_message(update, context)
 
-    context.bot.send_chat_action.assert_called()
+    assert (
+        update.message.reply_text.call_args_list[0].args[0]
+        == "⏳ Searching knowledge base..."
+    )
 
 
 @pytest.mark.asyncio
@@ -141,7 +156,7 @@ async def test_handle_message_reply_uses_html_parse_mode():
 
     await handle_message(update, context)
 
-    kwargs = update.message.reply_text.call_args.kwargs
+    kwargs = update.message.reply_text.call_args_list[1].kwargs
     assert kwargs.get("parse_mode") == "HTML"
 
 
@@ -172,7 +187,8 @@ async def test_handle_message_exception_returns_friendly_message_no_stack_trace(
 
     await handle_message(update, context)
 
-    message = update.message.reply_text.call_args.args[0]
+    status = update.message.reply_text.return_value
+    message = status.edit_text.call_args.args[0]
     assert "sorry" in message.lower() or "couldn't" in message.lower()
     assert "DB connection failed" not in message
 
@@ -188,7 +204,8 @@ async def test_handle_message_error_as_answer_returns_friendly_message_and_not_s
 
     await handle_message(update, context)
 
-    message = update.message.reply_text.call_args.args[0]
+    status = update.message.reply_text.return_value
+    message = status.edit_text.call_args.args[0]
     assert "Error generating answer" not in message
     history.save_turn.assert_not_called()
 
@@ -206,7 +223,8 @@ async def test_handle_message_error_key_returns_friendly_message_and_not_saved()
 
     await handle_message(update, context)
 
-    message = update.message.reply_text.call_args.args[0]
+    status = update.message.reply_text.return_value
+    message = status.edit_text.call_args.args[0]
     assert "No vectorstore found" not in message
     history.save_turn.assert_not_called()
 
@@ -275,7 +293,8 @@ async def test_handle_photo_download_failure_returns_couldnt_download_message():
 
     await handle_photo(update, context)
 
-    message = update.message.reply_text.call_args.args[0]
+    status = update.message.reply_text.return_value
+    message = status.edit_text.call_args.args[0]
     assert "couldn't download" in message.lower()
     assert "Network timeout" not in message
 
@@ -291,7 +310,8 @@ async def test_handle_photo_extraction_failure_returns_couldnt_read_message():
 
     await handle_photo(update, context)
 
-    message = update.message.reply_text.call_args.args[0]
+    status = update.message.reply_text.return_value
+    message = status.edit_text.call_args.args[0]
     assert "couldn't read" in message.lower()
     assert "Vision API" not in message
 
@@ -311,6 +331,6 @@ async def test_history_boundary_saves_raw_answer_not_formatted_html():
     saved_answer = save_call["assistant_message"]
     assert saved_answer == "The answer has H<sub>2</sub>O and 10<sup>2</sup>"
 
-    reply_text = update.message.reply_text.call_args.args[0]
+    reply_text = update.message.reply_text.call_args_list[1].args[0]
     assert "<sub>" not in reply_text
     assert "₂" in reply_text

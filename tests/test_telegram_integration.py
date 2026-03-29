@@ -42,9 +42,9 @@ class TestTextEndToEnd:
 
         await handle_message(update, context)
 
-        update.message.reply_text.assert_called_once()
-        reply = update.message.reply_text.call_args.args[0]
-        kwargs = update.message.reply_text.call_args.kwargs
+        assert update.message.reply_text.call_count == 2
+        reply = update.message.reply_text.call_args_list[1].args[0]
+        kwargs = update.message.reply_text.call_args_list[1].kwargs
 
         assert kwargs.get("parse_mode") == "HTML"
         assert "Mitosis creates two identical daughter cells." in reply
@@ -70,8 +70,9 @@ class TestPhotoEndToEnd:
         assert "Solve this physics problem" in query
         assert "A 2kg block is dropped from rest" in query
 
-        reply = update.message.reply_text.call_args.args[0]
-        kwargs = update.message.reply_text.call_args.kwargs
+        assert update.message.reply_text.call_count == 2
+        reply = update.message.reply_text.call_args_list[1].args[0]
+        kwargs = update.message.reply_text.call_args_list[1].kwargs
         assert "accelerates downward" in reply
         assert kwargs.get("parse_mode") == "HTML"
 
@@ -138,11 +139,13 @@ class TestErrorRecovery:
         context = _make_context(rag=rag, history=history)
 
         await handle_message(update1, context)
-        first_reply = update1.message.reply_text.call_args.args[0]
-        assert "sorry" in first_reply.lower() or "couldn't" in first_reply.lower()
+        assert update1.message.reply_text.call_count == 1
+        first_status = update1.message.reply_text.return_value
+        first_error = first_status.edit_text.call_args.args[0]
+        assert "sorry" in first_error.lower() or "couldn't" in first_error.lower()
 
         await handle_message(update2, context)
-        second_reply = update2.message.reply_text.call_args.args[0]
+        second_reply = update2.message.reply_text.call_args_list[1].args[0]
         assert "Recovered answer" in second_reply
 
         assert history.save_turn.call_count == 1
@@ -160,7 +163,8 @@ class TestEmptyKnowledgeBase:
 
         await handle_message(update, context)
 
-        reply = update.message.reply_text.call_args.args[0]
-        kwargs = update.message.reply_text.call_args.kwargs
+        assert update.message.reply_text.call_count == 2
+        reply = update.message.reply_text.call_args_list[1].args[0]
+        kwargs = update.message.reply_text.call_args_list[1].kwargs
         assert "No relevant information found." in reply
         assert kwargs.get("parse_mode") == "HTML"
