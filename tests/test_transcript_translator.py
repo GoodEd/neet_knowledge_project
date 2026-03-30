@@ -110,13 +110,14 @@ def test_translation_config_defaults_present(tmp_path: Path):
     config = Config(str(config_path))
 
     assert config.get("translation.enabled", False) is False
-    assert config.get("translation.provider") == "openrouter"
-    assert config.get("translation.model") == "google/gemma-3-12b-it"
+    assert config.get("translation.provider") == "transformers"
+    assert config.get("translation.model") == "google/translategemma-12b-it"
+    assert config.get("translation.quantize") == "4bit"
     assert config.get("translation.base_url") == "https://openrouter.ai/api/v1"
     assert config.get("translation.api_key_env_var") == "TRANSLATION_API_KEY"
     assert config.get("translation.source_lang") == "hi"
     assert config.get("translation.target_lang") == "en"
-    assert config.get("translation.max_chars_per_request") == 3000
+    assert config.get("translation.max_chars_per_request") == 1500
     assert config.get("translation.apply_only_to_s3_transcript") is True
 
 

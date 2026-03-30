@@ -46,12 +46,35 @@ def build_translation_translator(*, model_name: str) -> TranslatorProtocol:
             max_chars_per_request=cfg.translation_max_chars_per_request,
         )
 
-    # Fallback: local transformers pipeline (requires GPU)
-    from transformers import pipeline
+    # Local transformers pipeline (requires GPU or CPU with enough RAM)
+    from transformers import pipeline as _hf_pipeline
     from src.translation import TranscriptTranslator
 
+    quantize = cfg.translation_quantize
+    if quantize in ("4bit", "8bit"):
+        import functools
+        import torch
+        from transformers import BitsAndBytesConfig
+
+        bnb_config = BitsAndBytesConfig(
+            load_in_4bit=(quantize == "4bit"),
+            load_in_8bit=(quantize == "8bit"),
+            bnb_4bit_compute_dtype=torch.bfloat16 if quantize == "4bit" else None,
+        )
+
+        quantized_pipeline = functools.partial(
+            _hf_pipeline,
+            model_kwargs={"quantization_config": bnb_config},
+            device_map="auto",
+        )
+
+        return TranscriptTranslator(
+            pipeline_factory=quantized_pipeline,  # type: ignore[arg-type]  # functools.partial matches at runtime
+            model_name=model_name,
+        )
+
     return TranscriptTranslator(
-        pipeline_factory=pipeline,
+        pipeline_factory=_hf_pipeline,
         model_name=model_name,
     )
 
