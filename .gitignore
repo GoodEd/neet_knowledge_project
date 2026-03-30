@@ -53,3 +53,4 @@ chroma_db/
 *.tfstate.backup
 .terraform.lock.hcl
 deploy/terraform.tfvars
+.multi-review.yaml
