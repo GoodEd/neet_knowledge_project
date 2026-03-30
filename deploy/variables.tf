@@ -236,6 +236,12 @@ variable "ask_assistant_enabled" {
   default = "0"
 }
 
+variable "translation_api_key_secret_arn" {
+  description = "Secrets Manager ARN for TRANSLATION_API_KEY (OpenRouter key for transcript translation). Leave empty to skip."
+  type        = string
+  default     = ""
+}
+
 variable "telegram_bot_token_secret_arn" {
   description = "Secrets Manager ARN for TELEGRAM_BOT_TOKEN. Leave empty to disable the Telegram bot."
   type        = string

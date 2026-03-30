@@ -1,3 +1,7 @@
-from .transcript_translator import TranscriptTranslationError, TranscriptTranslator
+from .transcript_translator import (
+    OpenRouterTranslator,
+    TranscriptTranslationError,
+    TranscriptTranslator,
+)
 
-__all__ = ["TranscriptTranslationError", "TranscriptTranslator"]
+__all__ = ["OpenRouterTranslator", "TranscriptTranslationError", "TranscriptTranslator"]

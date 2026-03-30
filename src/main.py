@@ -20,6 +20,7 @@ from src.processors.youtube_processor import (
 )
 from src.rag.index_registry import resolve_index_directory, set_active_index
 from src.rag.vector_store import VectorStoreManager
+from src.utils.config import Config
 from src.utils.content_manager import ContentSource, ContentSourceManager
 
 _ = load_dotenv()
@@ -28,6 +29,24 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
 def build_translation_translator(*, model_name: str) -> TranslatorProtocol:
+    cfg = Config()
+    provider = cfg.translation_provider
+
+    if provider == "openrouter":
+        from src.translation import OpenRouterTranslator
+
+        api_key_env = cfg.translation_api_key_env_var
+        api_key = os.environ.get(api_key_env, "")
+        return OpenRouterTranslator(
+            api_key=api_key or None,
+            base_url=cfg.translation_base_url,
+            model_name=model_name,
+            source_lang_code=cfg.translation_source_lang,
+            target_lang_code=cfg.translation_target_lang,
+            max_chars_per_request=cfg.translation_max_chars_per_request,
+        )
+
+    # Fallback: local transformers pipeline (requires GPU)
     from transformers import pipeline
     from src.translation import TranscriptTranslator
 
@@ -192,9 +211,8 @@ def cmd_translate_s3_transcripts(args: argparse.Namespace) -> int:
                 continue
 
             if translator is None:
-                translator = build_translation_translator(
-                    model_name=args.translation_model
-                )
+                model = args.translation_model or Config().translation_model
+                translator = build_translation_translator(model_name=model)
 
             source_result = _translate_source_from_s3(
                 source=source,
@@ -764,8 +782,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     translate_s3_parser.add_argument(
         "--translation-model",
-        default="google/translategemma-12b-it",
-        help="Translation model override",
+        default=None,
+        help="Translation model override (default: from config.yaml)",
     )
     translate_s3_parser.add_argument(
         "--limit",

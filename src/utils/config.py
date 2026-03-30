@@ -77,11 +77,13 @@ class Config:
             },
             "translation": {
                 "enabled": False,
-                "provider": "transformers",
-                "model": "google/translategemma-12b-it",
+                "provider": "openrouter",
+                "model": "google/gemma-3-12b-it",
+                "base_url": "https://openrouter.ai/api/v1",
+                "api_key_env_var": "TRANSLATION_API_KEY",
                 "source_lang": "hi",
                 "target_lang": "en",
-                "max_chars_per_request": 1500,
+                "max_chars_per_request": 3000,
                 "apply_only_to_s3_transcript": True,
             },
             "rag": {
@@ -178,6 +180,16 @@ class Config:
     @property
     def translation_max_chars_per_request(self) -> int:
         return cast(int, self.get("translation.max_chars_per_request", 1500))
+
+    @property
+    def translation_base_url(self) -> str:
+        return cast(
+            str, self.get("translation.base_url", "https://openrouter.ai/api/v1")
+        )
+
+    @property
+    def translation_api_key_env_var(self) -> str:
+        return cast(str, self.get("translation.api_key_env_var", "TRANSLATION_API_KEY"))
 
     @property
     def translation_apply_only_to_s3_transcript(self) -> bool:

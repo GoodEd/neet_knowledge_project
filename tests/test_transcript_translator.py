@@ -1,13 +1,16 @@
 import os
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol, TypedDict, cast
+from unittest.mock import patch
 
 import pytest
 
 sys.path[:0] = [os.path.join(os.path.dirname(__file__), "..")]
 
 import src.translation.transcript_translator as _translator_module
+from src.translation.transcript_translator import OpenRouterTranslator
 from src.utils.config import Config
 
 
@@ -107,11 +110,13 @@ def test_translation_config_defaults_present(tmp_path: Path):
     config = Config(str(config_path))
 
     assert config.get("translation.enabled", False) is False
-    assert config.get("translation.provider") == "transformers"
-    assert config.get("translation.model") == "google/translategemma-12b-it"
+    assert config.get("translation.provider") == "openrouter"
+    assert config.get("translation.model") == "google/gemma-3-12b-it"
+    assert config.get("translation.base_url") == "https://openrouter.ai/api/v1"
+    assert config.get("translation.api_key_env_var") == "TRANSLATION_API_KEY"
     assert config.get("translation.source_lang") == "hi"
     assert config.get("translation.target_lang") == "en"
-    assert config.get("translation.max_chars_per_request") == 1500
+    assert config.get("translation.max_chars_per_request") == 3000
     assert config.get("translation.apply_only_to_s3_transcript") is True
 
 
@@ -297,3 +302,247 @@ def test_pipeline_errors_raise_transcript_translation_error():
 
     with pytest.raises(TranscriptTranslationError, match="boom"):
         _ = translator.translate_text("namaste dosto")
+
+
+# ---------------------------------------------------------------------------
+# OpenRouterTranslator tests
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class _FakeMessage:
+    content: str
+
+
+@dataclass
+class _FakeChoice:
+    message: _FakeMessage
+
+
+@dataclass
+class _FakeCompletionResponse:
+    choices: list[_FakeChoice]
+
+
+class _FakeCompletions:
+    def __init__(self, response: _FakeCompletionResponse) -> None:
+        self.response = response
+        self.calls: list[dict[str, object]] = []
+
+    def create(self, **kwargs: object) -> _FakeCompletionResponse:
+        self.calls.append(kwargs)
+        return self.response
+
+
+class _FakeChat:
+    def __init__(self, completions: _FakeCompletions) -> None:
+        self.completions = completions
+
+
+class _FakeOpenAIClient:
+    def __init__(self, completions: _FakeCompletions) -> None:
+        self.chat = _FakeChat(completions)
+        self.init_kwargs: dict[str, object] = {}
+
+
+def _make_openrouter_translator(
+    response_text: str = "hello world",
+    *,
+    max_chars_per_request: int = 3000,
+) -> tuple[OpenRouterTranslator, _FakeCompletions]:
+    response = _FakeCompletionResponse(
+        choices=[_FakeChoice(message=_FakeMessage(content=response_text))]
+    )
+    completions = _FakeCompletions(response)
+    client = _FakeOpenAIClient(completions)
+
+    def client_factory(**kwargs: object) -> _FakeOpenAIClient:
+        client.init_kwargs = kwargs
+        return client
+
+    translator = OpenRouterTranslator(
+        api_key="test-key",
+        base_url="https://openrouter.ai/api/v1",
+        client_factory=client_factory,
+        max_chars_per_request=max_chars_per_request,
+    )
+    return translator, completions
+
+
+def test_openrouter_translate_text_returns_response_content():
+    translator, completions = _make_openrouter_translator("hello world")
+
+    result = translator.translate_text("namaste dosto")
+
+    assert result == "hello world"
+    assert len(completions.calls) == 1
+    call = completions.calls[0]
+    assert call["model"] == "google/gemma-3-12b-it"
+    assert call["temperature"] == 0.1
+
+
+def test_openrouter_translate_text_sends_user_message_with_prompt():
+    translator, completions = _make_openrouter_translator("translated")
+
+    _ = translator.translate_text("kya haal hai")
+
+    messages = completions.calls[0]["messages"]
+    assert len(messages) == 1
+    assert messages[0]["role"] == "user"
+    assert "kya haal hai" in messages[0]["content"]
+    # Gemma 3 caveat: no system message
+    assert all(m["role"] != "system" for m in messages)
+
+
+def test_openrouter_translate_text_empty_returns_empty():
+    translator, completions = _make_openrouter_translator("should not be called")
+
+    result = translator.translate_text("   ")
+
+    assert result == ""
+    assert len(completions.calls) == 0
+
+
+def test_openrouter_translate_text_strips_whitespace():
+    translator, _ = _make_openrouter_translator("  hello world  ")
+
+    result = translator.translate_text("namaste")
+
+    assert result == "hello world"
+
+
+def test_openrouter_translate_text_chunks_long_input():
+    call_count = 0
+
+    def make_response() -> _FakeCompletionResponse:
+        nonlocal call_count
+        call_count += 1
+        return _FakeCompletionResponse(
+            choices=[_FakeChoice(message=_FakeMessage(content=f"chunk{call_count}"))]
+        )
+
+    class MultiCompletions:
+        def __init__(self) -> None:
+            self.calls: list[dict[str, object]] = []
+
+        def create(self, **kwargs: object) -> _FakeCompletionResponse:
+            self.calls.append(kwargs)
+            return make_response()
+
+    completions = MultiCompletions()
+    client = _FakeOpenAIClient(completions)
+
+    translator = OpenRouterTranslator(
+        api_key="test-key",
+        client_factory=lambda **_: client,
+        max_chars_per_request=10,
+    )
+
+    result = translator.translate_text("one two three four")
+
+    assert len(completions.calls) == 2
+    assert result == "chunk1 chunk2"
+
+
+def test_openrouter_translate_text_raises_on_empty_choices():
+    response = _FakeCompletionResponse(choices=[])
+    completions = _FakeCompletions(response)
+    client = _FakeOpenAIClient(completions)
+
+    translator = OpenRouterTranslator(
+        api_key="test-key",
+        client_factory=lambda **_: client,
+    )
+
+    with pytest.raises(TranscriptTranslationError, match="no choices"):
+        _ = translator.translate_text("namaste")
+
+
+def test_openrouter_translate_text_raises_on_empty_content():
+    translator, _ = _make_openrouter_translator("   ")
+
+    with pytest.raises(TranscriptTranslationError, match="did not include text"):
+        _ = translator.translate_text("namaste")
+
+
+def test_openrouter_translate_text_raises_on_api_error():
+    class FailingCompletions:
+        def create(self, **kwargs: object) -> None:
+            raise RuntimeError("connection refused")
+
+    class FailingChat:
+        def __init__(self) -> None:
+            self.completions = FailingCompletions()
+
+    class FailingClient:
+        def __init__(self) -> None:
+            self.chat = FailingChat()
+
+    translator = OpenRouterTranslator(
+        api_key="test-key",
+        client_factory=lambda **_: FailingClient(),
+    )
+
+    with pytest.raises(TranscriptTranslationError, match="connection refused"):
+        _ = translator.translate_text("namaste")
+
+
+def test_openrouter_translate_text_raises_when_no_api_key(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.delenv("TRANSLATION_API_KEY", raising=False)
+
+    translator = OpenRouterTranslator(api_key=None)
+
+    with pytest.raises(TranscriptTranslationError, match="TRANSLATION_API_KEY"):
+        _ = translator.translate_text("namaste")
+
+
+def test_openrouter_translator_satisfies_protocol():
+    translator, _ = _make_openrouter_translator("test")
+
+    assert hasattr(translator, "model_name")
+    assert hasattr(translator, "source_lang_code")
+    assert hasattr(translator, "target_lang_code")
+    assert hasattr(translator, "translate_text")
+    assert translator.model_name == "google/gemma-3-12b-it"
+    assert translator.source_lang_code == "hi"
+    assert translator.target_lang_code == "en"
+
+
+def test_openrouter_translator_custom_prompt_template():
+    translator, completions = _make_openrouter_translator(
+        "translated",
+    )
+    translator._prompt_template = "CUSTOM: {text}"
+
+    _ = translator.translate_text("test input")
+
+    user_content = completions.calls[0]["messages"][0]["content"]
+    assert user_content == "CUSTOM: test input"
+
+
+def test_openrouter_client_factory_receives_api_key_and_base_url():
+    received_kwargs: dict[str, object] = {}
+
+    def capturing_factory(**kwargs: object) -> _FakeOpenAIClient:
+        received_kwargs.update(kwargs)
+        response = _FakeCompletionResponse(
+            choices=[_FakeChoice(message=_FakeMessage(content="ok"))]
+        )
+        return _FakeOpenAIClient(_FakeCompletions(response))
+
+    translator = OpenRouterTranslator(
+        api_key="my-secret-key",
+        base_url="https://custom.api/v1",
+        client_factory=capturing_factory,
+    )
+    _ = translator.translate_text("test")
+
+    assert received_kwargs["api_key"] == "my-secret-key"
+    assert received_kwargs["base_url"] == "https://custom.api/v1"
+
+
+def test_package_reexport_includes_openrouter_translator():
+    import src.translation as translation_pkg
+
+    OpenRouterCls = getattr(translation_pkg, "OpenRouterTranslator", None)
+    assert OpenRouterCls is OpenRouterTranslator
